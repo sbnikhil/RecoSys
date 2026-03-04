@@ -36,3 +36,4 @@ processed/
 .env
 .env.local
 *.log
+secrets/
