@@ -159,15 +159,33 @@
       <aside class="w-full lg:w-[340px] flex-shrink-0 space-y-4">
         <!-- Session -->
         <div class="bg-white border border-slate-200 rounded-2xl ring-shadow overflow-hidden">
-          <div class="px-4 pt-4 pb-3 border-b border-slate-100 flex items-center justify-between">
-            <div>
+          <div class="px-4 pt-4 pb-3 border-b border-slate-100">
+            <div class="flex items-center justify-between mb-2">
               <h2 class="text-sm font-semibold text-slate-900">Your session</h2>
-              <p class="text-[11px] text-slate-500 mt-0.5">Sent to the model · capped at 20</p>
+              <span id="session-count" class="mono text-[10px] text-slate-400">0 / 20 events</span>
             </div>
-            <div class="flex gap-1">
-              <button onclick="loadPreset(1)" title="1-event preset" class="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition">1×</button>
-              <button onclick="loadPreset(2)" title="5-event preset" class="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition">5×</button>
-              <button onclick="loadPreset(3)" title="10-event preset" class="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition">10×</button>
+            <p class="text-[11px] text-slate-500 mb-2.5 leading-relaxed">
+              Browse products and your activity logs here automatically. Or use a <strong class="text-slate-700">quick-fill</strong> to instantly load demo events and test recommendations:
+            </p>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button onclick="loadPreset(1)"
+                class="text-[11px] font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-100 px-2 py-2 rounded-lg transition text-center leading-tight"
+                title="Loads 1 view event — fastest way to test">
+                <span class="block font-bold text-xs">Quick</span>
+                <span class="block opacity-70 mt-0.5">1 view</span>
+              </button>
+              <button onclick="loadPreset(2)"
+                class="text-[11px] font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-100 px-2 py-2 rounded-lg transition text-center leading-tight"
+                title="3 views + 2 cart-adds — mixed browsing signals">
+                <span class="block font-bold text-xs">Browsing</span>
+                <span class="block opacity-70 mt-0.5">3 views + 2 cart</span>
+              </button>
+              <button onclick="loadPreset(3)"
+                class="text-[11px] font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-100 px-2 py-2 rounded-lg transition text-center leading-tight"
+                title="6 views, 3 cart-adds, 1 purchase — realistic full session">
+                <span class="block font-bold text-xs">Shopper</span>
+                <span class="block opacity-70 mt-0.5">6 views + cart + buy</span>
+              </button>
             </div>
           </div>
           <div id="session-list" class="max-h-[320px] overflow-y-auto px-3 py-2 space-y-1.5">
@@ -353,58 +371,73 @@
     </div>
   </div>
 
-  <!-- Comparison + Drift two-col -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-    <div class="lg:col-span-2 bg-white border border-slate-200 rounded-2xl ring-shadow p-6">
-      <h2 class="text-base font-semibold text-slate-900">Model comparison</h2>
-      <p class="text-xs text-slate-500 mt-0.5 mb-4">Session-based next-item prediction on REES46.</p>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-200">
-              <th class="text-left font-medium py-2.5">Model</th>
-              <th class="text-right font-medium py-2.5">NDCG@20</th>
-              <th class="text-right font-medium py-2.5">HR@20</th>
-              <th class="text-left font-medium py-2.5 pl-4">Notes</th>
-            </tr>
-          </thead>
-          <tbody id="comparison-tbody"></tbody>
-        </table>
+  <!-- Model comparison (full width) -->
+  <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6 mb-6">
+    <div class="flex items-start justify-between mb-1">
+      <div>
+        <h2 class="text-base font-semibold text-slate-900">Model comparison</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Session-based next-item prediction on REES46 eCommerce dataset. Ranked by NDCG@20.</p>
+      </div>
+      <div class="hidden sm:flex gap-2 text-[11px] flex-wrap justify-end">
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-indigo-600"></span>My model</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-slate-400"></span>Published baseline</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-amber-400"></span>Trivial baseline</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-rose-400"></span>Negative result</span>
       </div>
     </div>
-
-    <!-- Drift panel -->
-    <div class="bg-white border border-slate-200 rounded-2xl ring-shadow overflow-hidden">
-      <div class="px-5 pt-5 pb-4 border-b border-slate-100">
-        <h2 class="text-base font-semibold text-slate-900">Distribution drift</h2>
-        <p class="text-[11px] text-slate-500 mt-0.5">Train Jan 2020 vs Test Mar 2020 (COVID period)</p>
-      </div>
-      <div id="drift-content" class="px-5 py-4">
-        <div class="skeleton h-3 w-3/4 mb-2"></div>
-        <div class="skeleton h-2 w-full mb-2"></div>
-        <div class="skeleton h-2 w-1/2"></div>
+    <div class="overflow-x-auto mb-6">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-200">
+            <th class="text-left font-medium py-2.5">Model</th>
+            <th class="text-left font-medium py-2.5 pl-3">Type</th>
+            <th class="text-right font-medium py-2.5">NDCG@20</th>
+            <th class="text-right font-medium py-2.5">HR@20</th>
+            <th class="text-left font-medium py-2.5 pl-4 w-64">Methodology</th>
+          </tr>
+        </thead>
+        <tbody id="comparison-tbody"></tbody>
+      </table>
+    </div>
+    <!-- NDCG@20 bar chart -->
+    <div class="border-t border-slate-100 pt-5">
+      <p class="text-xs font-medium text-slate-600 mb-4">NDCG@20 visual comparison</p>
+      <div class="relative h-56">
+        <canvas id="comp-chart"></canvas>
       </div>
     </div>
   </div>
 
-  <!-- Cohort -->
-  <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6 mb-6">
-    <h2 class="text-base font-semibold text-slate-900">Cohort breakdown</h2>
-    <p class="text-xs text-slate-500 mt-0.5 mb-4" id="cohort-note">Recall@10 by user maturity. Loaded from diagnostics.</p>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-200">
-            <th class="text-left font-medium py-2.5">Cohort</th>
-            <th class="text-right font-medium py-2.5">Users</th>
-            <th class="text-right font-medium py-2.5">Share</th>
-            <th class="text-right font-medium py-2.5">GRU4Rec R@10</th>
-            <th class="text-right font-medium py-2.5">Popularity R@10</th>
-            <th class="text-center font-medium py-2.5">Winner</th>
-          </tr>
-        </thead>
-        <tbody id="cohort-tbody"></tbody>
-      </table>
+  <!-- Distribution drift (full width) -->
+  <div class="bg-white border border-slate-200 rounded-2xl ring-shadow overflow-hidden mb-6">
+    <div class="px-6 pt-5 pb-4 border-b border-slate-100">
+      <h2 class="text-base font-semibold text-slate-900">Distribution drift monitor</h2>
+      <p class="text-[11px] text-slate-500 mt-0.5">Training window: Jan 2020 · Test window: Mar 2020 (COVID-19 period) · Monitored in production</p>
+    </div>
+    <div id="drift-content" class="p-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="skeleton h-24 rounded-xl"></div>
+        <div class="skeleton h-24 rounded-xl"></div>
+        <div class="skeleton h-24 rounded-xl"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Precision at K + Data scaling (two col) -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6">
+      <h2 class="text-base font-semibold text-slate-900">Precision at K (GRU4Rec V9, 1M)</h2>
+      <p class="text-xs text-slate-500 mt-0.5 mb-4">NDCG and Hit-Rate at two ranking cutoffs. Higher K means the model gets more chances to surface a relevant item.</p>
+      <div class="relative h-52">
+        <canvas id="atk-chart"></canvas>
+      </div>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6">
+      <h2 class="text-base font-semibold text-slate-900">Data scaling impact</h2>
+      <p class="text-xs text-slate-500 mt-0.5 mb-4">Same GRU4Rec V9 architecture trained on 500k vs 1M users. Confirms that more data consistently improves the model.</p>
+      <div class="relative h-52">
+        <canvas id="scaling-chart"></canvas>
+      </div>
     </div>
   </div>
 
@@ -500,7 +533,12 @@ let searchQ = '';
 let showN = 24;
 let currentProductId = null;
 let alsoViewCache = {};
-let chart = null;
+let trainChart = null;
+let compChart  = null;
+let atkChart   = null;
+let scalingChart = null;
+let overlapChart = null;
+let coverageChart = null;
 
 // ── Init ────────────────────────────────────────────────────────────────────
 
@@ -566,7 +604,10 @@ function setTab(tab, sub = null) {
   if (tab === 'shop') {
     setSubView(sub || activeSub || 'grid');
   } else if (tab === 'metrics') {
-    if (chart) chart.resize();
+    requestAnimationFrame(() => {
+      [trainChart, compChart, atkChart, scalingChart, overlapChart, coverageChart]
+        .forEach(c => c?.resize?.());
+    });
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -901,6 +942,8 @@ function renderCart() {
 // ── Session sidebar ─────────────────────────────────────────────────────────
 
 function renderSession() {
+  const countEl = document.getElementById('session-count');
+  if (countEl) countEl.textContent = `${session.length} / 20 events`;
   const list = document.getElementById('session-list');
   const empty = document.getElementById('session-empty');
 
@@ -1052,48 +1095,129 @@ async function loadDrift() {
     const thr = d.alert_threshold ?? 0.1;
     const pct = Math.min(100, Math.round(jsd / (thr * 2.5) * 100));
     const alerting = d.alert === true;
+    const overlapPct  = d.top50_item_overlap_pct  || 0;
+    const coveragePct = d.test_item_coverage_pct  || 0;
+
     el.innerHTML = `
-      <div class="space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">JSD</div>
-            <div class="mono text-2xl font-bold text-slate-900 mt-0.5">${jsd.toFixed(4)}</div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <!-- JSD explanation -->
+        <div class="md:col-span-1">
+          <div class="text-[11px] text-slate-500 uppercase tracking-wider font-medium mb-1">Catalog Shift Score (JSD)</div>
+          <div class="mono text-4xl font-bold text-slate-900">${jsd.toFixed(4)}</div>
+          <p class="text-xs text-slate-500 mt-3 leading-relaxed">
+            Measures how much <strong class="text-slate-700">item popularity changed</strong> between the training window (Jan 2020) and the test window (Mar 2020).
+            <br><br><strong class="text-slate-700">0</strong> = identical popularity distribution · <strong class="text-slate-700">1</strong> = completely different. COVID-19 altered shopping behaviour in March 2020, spiking demand for essentials and crashing other categories.
+          </p>
+          <div class="mt-4">
+            <div class="relative h-2.5 bg-slate-100 rounded-full overflow-hidden">
+              <div class="h-full rounded-full transition-all ${alerting?'bg-amber-500':'bg-emerald-500'}" style="width:${pct}%"></div>
+              <div class="absolute inset-y-0 w-px bg-slate-400/70" style="left:40%"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-400 mt-1.5">
+              <span>0 · stable</span><span>threshold ${thr}</span><span>0.25+</span>
+            </div>
           </div>
-          <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full ${alerting?'bg-amber-100 text-amber-800':'bg-emerald-100 text-emerald-800'}">
-            ${alerting ? '⚠ DRIFT DETECTED' : '✓ STABLE'}
-          </span>
-        </div>
-        <div>
-          <div class="relative h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div class="h-full rounded-full ${alerting?'bg-amber-500':'bg-emerald-500'}" style="width:${pct}%"></div>
-            <div class="absolute inset-y-0 w-0.5 bg-slate-400" style="left:40%"></div>
+          <div class="mt-4 inline-flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full ${alerting?'bg-amber-100 text-amber-800':'bg-emerald-100 text-emerald-800'}">
+            ${alerting ? '⚠ Drift detected — retraining recommended' : '✓ Distribution is stable'}
           </div>
-          <div class="flex justify-between text-[10px] text-slate-500 mt-1.5 px-0.5">
-            <span>0</span><span>threshold ${thr}</span><span>0.25</span>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-2 text-[11px]">
-          <div class="bg-slate-50 rounded-xl p-3">
-            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Top-50 overlap</div>
-            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.top50_item_overlap_pct||0).toFixed(1)}%</div>
-          </div>
-          <div class="bg-slate-50 rounded-xl p-3">
-            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Test coverage</div>
-            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.test_item_coverage_pct||0).toFixed(1)}%</div>
-          </div>
-          <div class="bg-slate-50 rounded-xl p-3">
-            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Train events</div>
-            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.n_train_events/1e6).toFixed(1)}M</div>
-          </div>
-          <div class="bg-slate-50 rounded-xl p-3">
-            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Test events</div>
-            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.n_test_events/1e6).toFixed(1)}M</div>
+          <div class="grid grid-cols-2 gap-2 mt-4 text-[11px]">
+            <div class="bg-slate-50 rounded-xl p-2.5">
+              <div class="text-slate-500 text-[10px] uppercase tracking-wider">Train events</div>
+              <div class="mono font-bold text-slate-900 mt-0.5">${((d.n_train_events||0)/1e6).toFixed(1)}M</div>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-2.5">
+              <div class="text-slate-500 text-[10px] uppercase tracking-wider">Test events</div>
+              <div class="mono font-bold text-slate-900 mt-0.5">${((d.n_test_events||0)/1e6).toFixed(1)}M</div>
+            </div>
           </div>
         </div>
-        ${d.narrative?`<p class="text-[11px] text-slate-600 leading-relaxed border-t border-slate-100 pt-3">${d.narrative}</p>`:''}
-      </div>`;
+
+        <!-- Bestseller stability donut -->
+        <div class="bg-slate-50 rounded-2xl p-5 flex flex-col">
+          <div class="font-semibold text-slate-800 text-sm">Bestseller Stability</div>
+          <p class="text-[11px] text-slate-500 mt-1 mb-4 leading-relaxed">
+            Out of the <strong>50 most popular items</strong> during training, what percentage were still in the top-50 during testing?
+            <br><br>A low score means the bestsellers changed significantly — products the model was optimised for are no longer trending.
+          </p>
+          <div class="flex items-center gap-4 mt-auto">
+            <div class="relative w-24 h-24 flex-shrink-0">
+              <canvas id="overlap-canvas"></canvas>
+              <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span class="mono text-lg font-bold text-slate-900">${overlapPct.toFixed(0)}%</span>
+              </div>
+            </div>
+            <div class="text-xs text-slate-600 leading-relaxed">
+              <span class="font-semibold text-slate-800">${overlapPct.toFixed(0)}%</span> of the training bestsellers stayed popular.<br>
+              <span class="${overlapPct < 75 ? 'text-amber-700' : 'text-emerald-700'} font-medium">${overlapPct < 75 ? 'Significant turnover — preferences shifted.' : 'High stability — similar items stayed popular.'}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Model coverage donut -->
+        <div class="bg-slate-50 rounded-2xl p-5 flex flex-col">
+          <div class="font-semibold text-slate-800 text-sm">Model Coverage</div>
+          <p class="text-[11px] text-slate-500 mt-1 mb-4 leading-relaxed">
+            Of all the items clicked during testing, what percentage had the model <strong>already seen in training</strong>?
+            <br><br>A low score means many items appearing in the test period are brand-new to the model — it must extrapolate to items it was never trained on.
+          </p>
+          <div class="flex items-center gap-4 mt-auto">
+            <div class="relative w-24 h-24 flex-shrink-0">
+              <canvas id="coverage-canvas"></canvas>
+              <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span class="mono text-lg font-bold text-slate-900">${coveragePct.toFixed(0)}%</span>
+              </div>
+            </div>
+            <div class="text-xs text-slate-600 leading-relaxed">
+              <span class="font-semibold text-slate-800">${coveragePct.toFixed(0)}%</span> of test clicks came from known items.<br>
+              <span class="${coveragePct < 70 ? 'text-amber-700' : 'text-emerald-700'} font-medium">${coveragePct < 70 ? 'Many new items — cold-start challenge.' : 'Good coverage — model trained on most items.'}</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      ${d.narrative ? `<div class="mt-5 p-4 rounded-2xl bg-amber-50 border border-amber-100 text-xs text-amber-800 leading-relaxed">${d.narrative}</div>` : ''}`;
+
+    // Build donut charts after DOM is updated
+    requestAnimationFrame(() => buildDriftDonuts(overlapPct, coveragePct, alerting));
+
   } catch {
-    el.innerHTML = '<p class="text-xs text-slate-500">Drift report unavailable.</p>';
+    el.innerHTML = '<p class="text-sm text-slate-500 py-4">Drift report unavailable. API may be offline.</p>';
+  }
+}
+
+function buildDriftDonuts(overlapPct, coveragePct, alerting) {
+  const donutOpts = (value, color, label) => ({
+    type: 'doughnut',
+    data: {
+      datasets: [{
+        data: [value, 100 - value],
+        backgroundColor: [color, '#f1f5f9'],
+        borderWidth: 0,
+        cutout: '72%',
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: ctx => ctx.dataIndex === 0 ? `${label}: ${value.toFixed(1)}%` : `Remaining: ${(100-value).toFixed(1)}%` }
+        }
+      }
+    }
+  });
+
+  const oc = document.getElementById('overlap-canvas');
+  if (oc) {
+    if (overlapChart) overlapChart.destroy();
+    overlapChart = new Chart(oc, donutOpts(overlapPct, alerting ? '#f59e0b' : '#10b981', 'Bestseller stability'));
+  }
+  const cc = document.getElementById('coverage-canvas');
+  if (cc) {
+    if (coverageChart) coverageChart.destroy();
+    coverageChart = new Chart(cc, donutOpts(coveragePct, coveragePct < 70 ? '#f59e0b' : '#10b981', 'Model coverage'));
   }
 }
 
@@ -1107,41 +1231,43 @@ function renderMetricsView() {
   document.getElementById('kpi-hr').textContent    = metrics.kpis.hr_20.toFixed(4);
   document.getElementById('kpi-vspop').textContent = `${metrics.kpis.vs_popularity_x.toFixed(1)}×`;
 
+  // Type → badge style map
+  const typeBadge = {
+    my_best:   'bg-indigo-100 text-indigo-800',
+    my_model:  'bg-indigo-50 text-indigo-600',
+    published: 'bg-slate-100 text-slate-700',
+    trivial:   'bg-amber-50 text-amber-700',
+    negative:  'bg-rose-50 text-rose-700',
+  };
+  const typeLabel = {
+    my_best:   'My model · best',
+    my_model:  'My model',
+    published: 'Paper baseline',
+    trivial:   'Trivial baseline',
+    negative:  'My negative result',
+  };
+
   // Comparison table
   const tbody = document.getElementById('comparison-tbody');
   tbody.innerHTML = '';
   for (const row of metrics.comparison) {
     const tr = document.createElement('tr');
-    tr.className = `border-b border-slate-100 ${row.highlight ? 'bg-indigo-50/50' : ''}`;
+    tr.className = `border-b border-slate-100 ${row.type === 'my_best' ? 'bg-indigo-50/40' : ''}`;
+    const badge = typeBadge[row.type] || 'bg-slate-100 text-slate-700';
+    const label = typeLabel[row.type] || row.type;
+    const isHighlight = row.type === 'my_best';
     tr.innerHTML = `
-      <td class="py-3.5">
-        <div class="font-semibold ${row.highlight ? 'text-indigo-700' : 'text-slate-900'}">${row.model}</div>
+      <td class="py-3.5 pr-3">
+        <div class="font-semibold ${isHighlight ? 'text-indigo-700' : 'text-slate-900'}">${row.model}</div>
       </td>
-      <td class="py-3.5 text-right mono font-semibold ${row.highlight ? 'text-indigo-700' : 'text-slate-900'}">${row.ndcg_20!=null?row.ndcg_20.toFixed(4):'—'}</td>
-      <td class="py-3.5 text-right mono ${row.highlight ? 'text-indigo-700 font-semibold' : 'text-slate-700'}">${row.hr_20!=null?row.hr_20.toFixed(4):'—'}</td>
-      <td class="py-3.5 pl-4 text-xs text-slate-500">${row.note}</td>`;
+      <td class="py-3.5 pl-0 pr-4">
+        <span class="inline-block text-[11px] font-medium px-2 py-0.5 rounded-md whitespace-nowrap ${badge}">${label}</span>
+      </td>
+      <td class="py-3.5 text-right mono font-semibold ${isHighlight ? 'text-indigo-700' : 'text-slate-900'}">${row.ndcg_20!=null?row.ndcg_20.toFixed(4):'—'}</td>
+      <td class="py-3.5 text-right mono ${isHighlight ? 'text-indigo-600' : 'text-slate-600'}">${row.hr_20!=null?row.hr_20.toFixed(4):'—'}</td>
+      <td class="py-3.5 pl-4 text-xs text-slate-500 w-64">${row.methodology||row.note}</td>`;
     tbody.appendChild(tr);
   }
-
-  // Cohort table
-  const ctb = document.getElementById('cohort-tbody');
-  ctb.innerHTML = '';
-  for (const row of metrics.cohorts) {
-    const tr = document.createElement('tr');
-    tr.className = 'border-b border-slate-100';
-    const winner = row.winner === 'gru4rec' ? '🏆 Model' : 'Popularity';
-    tr.innerHTML = `
-      <td class="py-3.5 font-medium text-slate-900">${row.cohort}</td>
-      <td class="py-3.5 text-right mono text-slate-700">${row.users.toLocaleString()}</td>
-      <td class="py-3.5 text-right mono text-slate-500">${row.share_pct.toFixed(1)}%</td>
-      <td class="py-3.5 text-right mono text-slate-700">${row.gru4rec_r10.toFixed(4)}</td>
-      <td class="py-3.5 text-right mono text-slate-700">${row.popularity_r10.toFixed(4)}</td>
-      <td class="py-3.5 text-center text-xs">
-        <span class="px-2 py-1 rounded-md ${row.winner==='gru4rec'?'bg-emerald-50 text-emerald-700':'bg-slate-100 text-slate-700'}">${winner}</span>
-      </td>`;
-    ctb.appendChild(tr);
-  }
-  if (metrics.cohort_note) document.getElementById('cohort-note').textContent = metrics.cohort_note;
 
   // Hyperparams
   const hp = document.getElementById('hparam-list');
@@ -1169,22 +1295,29 @@ function renderMetricsView() {
     mm.innerHTML += `<dt class="text-slate-500">${k}</dt><dd class="mono text-slate-900 font-medium text-right">${v}</dd>`;
   }
 
-  // Chart
-  setTimeout(buildChart, 50);
+  setTimeout(buildAllCharts, 50);
 }
 
-function buildChart() {
-  if (!metrics.training_history || !window.Chart) return;
+function buildAllCharts() {
+  if (!window.Chart) return;
+  buildTrainChart();
+  buildCompChart();
+  buildAtkChart();
+  buildScalingChart();
+}
+
+function buildTrainChart() {
+  if (!metrics.training_history) return;
   const ctx = document.getElementById('train-chart');
   if (!ctx) return;
-  if (chart) chart.destroy();
+  if (trainChart) trainChart.destroy();
 
   const epochs = metrics.training_history.map(r => r.epoch);
   const ndcg   = metrics.training_history.map(r => r.ndcg_20);
   const loss   = metrics.training_history.map(r => r.train_loss);
   const bestEp = metrics.model.best_epoch;
 
-  chart = new Chart(ctx, {
+  trainChart = new Chart(ctx, {
     type: 'line',
     data: {
       labels: epochs,
@@ -1193,24 +1326,24 @@ function buildChart() {
           label: 'Val NDCG@20',
           data: ndcg,
           borderColor: '#4f46e5',
-          backgroundColor: 'rgba(79,70,229,0.1)',
+          backgroundColor: 'rgba(79,70,229,0.08)',
           borderWidth: 2.5,
           fill: true,
-          tension: 0.3,
+          tension: 0.35,
           yAxisID: 'y',
-          pointRadius: ctx => ctx.dataIndex + 1 === bestEp ? 6 : 0,
+          pointRadius: epochs.map((_, i) => i + 1 === bestEp ? 7 : 0),
           pointBackgroundColor: '#4f46e5',
           pointBorderColor: '#fff',
-          pointBorderWidth: 2,
+          pointBorderWidth: 2.5,
         },
         {
           label: 'Train loss',
           data: loss,
           borderColor: '#fb7185',
           borderWidth: 2,
-          borderDash: [4,4],
+          borderDash: [5, 4],
           fill: false,
-          tension: 0.3,
+          tension: 0.35,
           yAxisID: 'y1',
           pointRadius: 0,
         },
@@ -1227,35 +1360,170 @@ function buildChart() {
           padding: 10,
           titleFont: { weight: '600' },
           callbacks: {
-            title: items => `Epoch ${items[0].label}${(+items[0].label)===bestEp ? '  ★ best' : ''}`,
-            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}`,
+            title: items => `Epoch ${items[0].label}${(+items[0].label) === bestEp ? '  ★ best checkpoint' : ''}`,
+            label: ctx => `  ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}`,
           },
         },
       },
       scales: {
         x: {
           title: { display: true, text: 'Epoch', color: '#64748b', font:{size:11} },
-          grid:  { color: '#f1f5f9' },
-          ticks: { color: '#64748b', font:{size:10, family: 'JetBrains Mono'} },
+          grid:  { color: '#f8fafc' },
+          ticks: { color: '#94a3b8', font:{size:10, family: 'JetBrains Mono'} },
         },
         y: {
           position: 'left',
           title: { display: true, text: 'Val NDCG@20', color: '#4f46e5', font:{size:11, weight:'600'} },
           grid:  { color: '#f1f5f9' },
           ticks: { color: '#4f46e5', font:{size:10, family: 'JetBrains Mono'} },
-          min: 0.23,
-          max: 0.27,
+          min: 0.23, max: 0.27,
         },
         y1: {
           position: 'right',
           title: { display: true, text: 'Train loss', color: '#fb7185', font:{size:11, weight:'600'} },
           grid:  { display: false },
           ticks: { color: '#fb7185', font:{size:10, family: 'JetBrains Mono'} },
-          min: 6.85,
-          max: 7.7,
+          min: 6.85, max: 7.7,
         },
       },
     },
+  });
+}
+
+function buildCompChart() {
+  if (!metrics.comparison) return;
+  const ctx = document.getElementById('comp-chart');
+  if (!ctx) return;
+  if (compChart) compChart.destroy();
+
+  const colorMap = { my_best:'#4f46e5', my_model:'#818cf8', published:'#94a3b8', trivial:'#fbbf24', negative:'#fb7185' };
+  const labels   = metrics.comparison.map(r => r.model);
+  const data     = metrics.comparison.map(r => r.ndcg_20 ?? 0);
+  const bgs      = metrics.comparison.map(r => colorMap[r.type] || '#94a3b8');
+
+  compChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'NDCG@20',
+        data,
+        backgroundColor: bgs,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          padding: 10,
+          callbacks: { label: ctx => `  NDCG@20: ${ctx.parsed.x.toFixed(4)}` }
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'NDCG@20', color: '#64748b', font:{size:11} },
+          grid: { color: '#f1f5f9' },
+          ticks: { color: '#64748b', font:{size:10, family:'JetBrains Mono'} },
+          min: 0, max: 0.32,
+        },
+        y: {
+          grid: { display: false },
+          ticks: { color: '#334155', font:{size:11} }
+        }
+      }
+    }
+  });
+}
+
+function buildAtkChart() {
+  if (!metrics.at_k) return;
+  const ctx = document.getElementById('atk-chart');
+  if (!ctx) return;
+  if (atkChart) atkChart.destroy();
+
+  const labels = metrics.at_k.map(r => `K = ${r.k}`);
+  const ndcg   = metrics.at_k.map(r => r.ndcg);
+  const hr     = metrics.at_k.map(r => r.hr);
+
+  atkChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'NDCG@K', data: ndcg, backgroundColor: '#4f46e5', borderRadius: 6, borderSkipped: false },
+        { label: 'HR@K',   data: hr,   backgroundColor: '#a5b4fc', borderRadius: 6, borderSkipped: false },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, padding: 12, font:{size:11} } },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          padding: 10,
+          callbacks: { label: ctx => `  ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}` }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#334155', font:{size:11} } },
+        y: {
+          grid: { color: '#f1f5f9' },
+          ticks: { color: '#64748b', font:{size:10, family:'JetBrains Mono'} },
+          min: 0, max: 0.55,
+          title: { display: true, text: 'Score', color: '#64748b', font:{size:11} }
+        }
+      }
+    }
+  });
+}
+
+function buildScalingChart() {
+  if (!metrics.scaling) return;
+  const ctx = document.getElementById('scaling-chart');
+  if (!ctx) return;
+  if (scalingChart) scalingChart.destroy();
+
+  const labels = metrics.scaling.map(r => r.scale);
+  const ndcg   = metrics.scaling.map(r => r.ndcg);
+  const hr     = metrics.scaling.map(r => r.hr);
+
+  scalingChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'NDCG@20', data: ndcg, backgroundColor: '#4f46e5', borderRadius: 6, borderSkipped: false },
+        { label: 'HR@20',   data: hr,   backgroundColor: '#a5b4fc', borderRadius: 6, borderSkipped: false },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, padding: 12, font:{size:11} } },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          padding: 10,
+          callbacks: { label: ctx => `  ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}` }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#334155', font:{size:11} } },
+        y: {
+          grid: { color: '#f1f5f9' },
+          ticks: { color: '#64748b', font:{size:10, family:'JetBrains Mono'} },
+          min: 0.24, max: 0.52,
+          title: { display: true, text: 'Score', color: '#64748b', font:{size:11} }
+        }
+      }
+    }
   });
 }
 
