@@ -5,200 +5,463 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RecoSys — Live Recommender Demo</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Inter', sans-serif; background: #070c18; color: #e2e8f0; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: #0f172a; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-    .product-card .hover-overlay { opacity: 0; transition: opacity 0.15s ease; }
-    .product-card:hover .hover-overlay { opacity: 1; }
-    .product-card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
-    .product-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
-    .tab-btn.active { background: #2563eb !important; color: #fff !important; border-color: #2563eb !important; }
-    .tab-btn { transition: background 0.12s, color 0.12s; }
+    :root {
+      --indigo: #4f46e5;
+      --indigo-soft: #eef2ff;
+      --emerald: #059669;
+      --amber: #d97706;
+      --rose: #e11d48;
+    }
+    html, body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: #0f172a; }
+    .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: "tnum"; }
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    .pcard { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+    .pcard:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -12px rgba(15,23,42,.18); border-color: #c7d2fe; }
+    .pcard:active { transform: translateY(-1px); }
+
+    .tab-pill.active {
+      background: var(--indigo) !important;
+      color: #fff !important;
+      border-color: var(--indigo) !important;
+    }
+    .tab-pill { transition: background .12s, color .12s, border-color .12s; }
+
+    .top-tab { position: relative; transition: color .15s; }
+    .top-tab.active { color: var(--indigo); font-weight: 600; }
+    .top-tab.active::after {
+      content: ''; position: absolute; left: 0; right: 0; bottom: -13px;
+      height: 2px; background: var(--indigo); border-radius: 2px;
+    }
+
+    .fade-in { animation: fade .25s ease-out; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    .skeleton { background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 6px; }
     @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
-    .skeleton { background: linear-gradient(90deg, #1e293b 25%, #253347 50%, #1e293b 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 4px; }
+
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 80;
+      background: #0f172a; color: #fff; padding: 12px 18px; border-radius: 12px;
+      font-size: 13px; font-weight: 500; box-shadow: 0 10px 30px -10px rgba(15,23,42,.4);
+      animation: toastIn .25s ease-out, toastOut .3s ease-in 1.8s forwards;
+      display: flex; align-items: center; gap: 10px;
+    }
+    @keyframes toastIn  { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+    @keyframes toastOut { to   { opacity: 0; transform: translateY(20px); } }
+
+    .ring-shadow { box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 4px 12px -6px rgba(15,23,42,.08); }
+
+    /* dotted divider */
+    .divider-dot { background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px); background-size: 8px 8px; height: 1px; }
+
+    .kpi-card {
+      background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%);
+    }
   </style>
 </head>
 <body class="min-h-screen">
 
-<!-- HEADER -->
-<header class="sticky top-0 z-40 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md">
-  <div class="max-w-[1440px] mx-auto px-5 py-3 flex items-center gap-6">
-    <div class="flex-1">
-      <div class="flex items-baseline gap-2">
-        <span class="text-lg font-bold tracking-tight">
-          <span class="text-blue-400">Reco</span><span class="text-white">Sys</span>
-        </span>
-        <span class="hidden sm:block text-slate-500 text-xs">GRU4Rec Session Recommender</span>
+<!-- ════════════════════════════════════════════════════════════════════════════════
+     HEADER
+     ════════════════════════════════════════════════════════════════════════════════ -->
+<header class="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
+  <div class="max-w-[1440px] mx-auto px-6 h-16 flex items-center gap-8">
+    <!-- Brand -->
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-xl flex items-center justify-center" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" class="w-4 h-4">
+          <path d="M3 12l4-4 4 4 4-8 6 12"/>
+        </svg>
       </div>
-      <div class="text-[11px] text-slate-500 mt-0.5">REES46 eCommerce · 222,864 items · 1M users · PyTorch + FAISS ANN</div>
+      <div class="leading-tight">
+        <div class="font-bold text-[15px] tracking-tight">RecoSys</div>
+        <div class="text-[10px] text-slate-500 -mt-0.5 hidden sm:block">GRU4Rec · 1M users · live</div>
+      </div>
     </div>
-    <div class="flex items-center gap-5">
-      <div class="text-center hidden md:block">
-        <div class="mono text-base font-bold text-emerald-400">0.2676</div>
-        <div class="text-[10px] text-slate-500 uppercase tracking-wider">NDCG@20</div>
-      </div>
-      <div class="text-center hidden md:block">
-        <div class="mono text-base font-bold text-emerald-400">0.4815</div>
-        <div class="text-[10px] text-slate-500 uppercase tracking-wider">HR@20</div>
-      </div>
-      <div class="hidden md:block w-px h-8 bg-slate-700"></div>
-      <div id="status-badge" class="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-xs px-3 py-1.5 rounded-full">
-        <span class="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse"></span>
-        <span class="text-slate-400">Connecting…</span>
+
+    <!-- Top tabs -->
+    <nav class="flex items-center gap-7 text-sm text-slate-600">
+      <button id="tab-shop"    class="top-tab active py-1" onclick="setTab('shop')">Shop</button>
+      <button id="tab-metrics" class="top-tab py-1"        onclick="setTab('metrics')">Model Performance</button>
+    </nav>
+
+    <!-- Right cluster -->
+    <div class="ml-auto flex items-center gap-3">
+      <!-- Cart -->
+      <button id="cart-btn" onclick="setTab('shop','cart')"
+        class="relative flex items-center gap-2 px-3 h-9 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4 text-slate-700">
+          <circle cx="9"  cy="21" r="1"/>
+          <circle cx="20" cy="21" r="1"/>
+          <path d="M1 1h4l2.7 13.4a2 2 0 002 1.6h9.7a2 2 0 002-1.6L23 6H6"/>
+        </svg>
+        <span class="text-xs font-semibold text-slate-700">Cart</span>
+        <span id="cart-badge" class="hidden mono text-[10px] font-bold bg-indigo-600 text-white rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">0</span>
+      </button>
+
+      <!-- Status -->
+      <div id="status-badge" class="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-slate-200 bg-white">
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+        <span class="text-[11px] text-slate-500">Connecting…</span>
       </div>
     </div>
   </div>
 </header>
 
-<!-- MAIN -->
-<div class="max-w-[1440px] mx-auto px-5 py-5 flex gap-5">
 
-  <!-- LEFT: catalog -->
-  <div class="flex-1 min-w-0">
-    <!-- Category tabs -->
-    <div class="overflow-x-auto pb-1 mb-4">
-      <div id="cat-tabs" class="flex gap-1.5 flex-nowrap min-w-max"></div>
-    </div>
-    <!-- Search bar + count -->
-    <div class="flex items-center gap-3 mb-4">
-      <div class="relative">
-        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        <input id="search-input" type="text" placeholder="Search brand, subcategory, ID…"
-          class="bg-slate-800 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-xs text-slate-300 placeholder-slate-500 w-60 focus:outline-none focus:border-blue-500 transition">
+<!-- ════════════════════════════════════════════════════════════════════════════════
+     SHOP VIEW
+     ════════════════════════════════════════════════════════════════════════════════ -->
+<main id="view-shop" class="max-w-[1440px] mx-auto px-6 py-6">
+
+  <!-- ────────────────── SUB-VIEW: GRID ────────────────── -->
+  <section id="sub-grid" class="fade-in">
+    <div class="flex flex-col lg:flex-row gap-6">
+      <!-- Left: catalog -->
+      <div class="flex-1 min-w-0">
+        <!-- Title block -->
+        <div class="mb-5">
+          <h1 class="text-2xl font-bold tracking-tight">Shop the catalog</h1>
+          <p class="text-sm text-slate-500 mt-1">Click any product to view it. We'll log your activity into a session and use it to recommend what you might like next.</p>
+        </div>
+        <!-- Category tabs -->
+        <div class="overflow-x-auto pb-2 mb-4 -mx-1 px-1">
+          <div id="cat-tabs" class="flex gap-2 flex-nowrap min-w-max"></div>
+        </div>
+        <!-- Search + count -->
+        <div class="flex items-center gap-3 mb-5">
+          <div class="relative flex-1 max-w-md">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input id="search-input" type="text" placeholder="Search brand, subcategory, or item ID"
+              class="bg-white border border-slate-200 rounded-xl pl-10 pr-3 h-10 text-sm w-full placeholder-slate-400 focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition">
+          </div>
+          <span id="grid-count" class="text-xs text-slate-500 mono ml-auto"></span>
+        </div>
+        <!-- Grid -->
+        <div id="product-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+        <!-- Show more -->
+        <div id="load-more-wrap" class="mt-7 text-center hidden">
+          <button onclick="showMore()" class="text-sm font-medium text-indigo-600 hover:text-indigo-700 border border-slate-200 hover:border-indigo-300 bg-white px-6 py-2.5 rounded-xl transition">
+            Show more products
+          </button>
+        </div>
       </div>
-      <span id="grid-count" class="text-xs text-slate-500 mono ml-auto"></span>
+
+      <!-- Right: session + recs -->
+      <aside class="w-full lg:w-[340px] flex-shrink-0 space-y-4">
+        <!-- Session -->
+        <div class="bg-white border border-slate-200 rounded-2xl ring-shadow overflow-hidden">
+          <div class="px-4 pt-4 pb-3 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-slate-900">Your session</h2>
+              <p class="text-[11px] text-slate-500 mt-0.5">Sent to the model · capped at 20</p>
+            </div>
+            <div class="flex gap-1">
+              <button onclick="loadPreset(1)" title="1-event preset" class="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition">1×</button>
+              <button onclick="loadPreset(2)" title="5-event preset" class="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition">5×</button>
+              <button onclick="loadPreset(3)" title="10-event preset" class="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition">10×</button>
+            </div>
+          </div>
+          <div id="session-list" class="max-h-[320px] overflow-y-auto px-3 py-2 space-y-1.5">
+            <div id="session-empty" class="py-10 text-center">
+              <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-slate-100 flex items-center justify-center">
+                <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3h18v4H3z"/><path d="M5 7v13h14V7"/><path d="M9 11h6"/></svg>
+              </div>
+              <p class="text-xs text-slate-500">Click any product to start.<br>Your activity will appear here.</p>
+            </div>
+          </div>
+          <div class="px-3 pb-3 pt-2 border-t border-slate-100 flex gap-2">
+            <button onclick="clearSession()" class="text-xs font-medium bg-white hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 hover:border-rose-200 px-3 py-2 rounded-lg transition">Clear</button>
+            <button onclick="getRecommendations()" id="reco-btn"
+              class="flex-1 text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-indigo-200">
+              Get Recommendations
+            </button>
+          </div>
+        </div>
+
+        <!-- Recs -->
+        <div id="reco-panel" class="hidden bg-white border border-slate-200 rounded-2xl ring-shadow overflow-hidden fade-in">
+          <div class="px-4 pt-4 pb-3 border-b border-slate-100 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-slate-900">Recommended for you</h2>
+            <span id="reco-meta" class="text-[10px] mono text-slate-400"></span>
+          </div>
+          <div id="reco-list" class="max-h-[460px] overflow-y-auto px-2 py-2 space-y-0.5"></div>
+        </div>
+      </aside>
     </div>
-    <!-- Grid -->
-    <div id="product-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3"></div>
-    <!-- Load more -->
-    <div id="load-more-wrap" class="mt-5 text-center hidden">
-      <button onclick="showMore()" class="text-xs text-blue-400 hover:text-blue-300 border border-slate-700 hover:border-blue-600 px-5 py-2 rounded-lg transition">
-        Show more
-      </button>
+  </section>
+
+
+  <!-- ────────────────── SUB-VIEW: PRODUCT ────────────────── -->
+  <section id="sub-product" class="hidden fade-in">
+    <button onclick="setTab('shop','grid')" class="text-sm text-slate-500 hover:text-indigo-600 mb-5 flex items-center gap-1.5 transition">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      Back to shop
+    </button>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 mb-12">
+      <!-- Image panel -->
+      <div id="product-hero" class="aspect-square rounded-3xl flex items-center justify-center relative overflow-hidden ring-shadow border">
+        <!-- populated by renderProduct -->
+      </div>
+
+      <!-- Info panel -->
+      <div class="flex flex-col">
+        <div id="product-breadcrumb" class="text-xs text-slate-500 uppercase tracking-wider mb-3"></div>
+        <h1 id="product-title" class="text-3xl font-bold tracking-tight leading-tight"></h1>
+        <div id="product-subtitle" class="text-base text-slate-500 mt-2"></div>
+
+        <div class="flex items-baseline gap-3 mt-6">
+          <span id="product-price" class="text-4xl font-bold mono tracking-tight"></span>
+          <span class="text-sm text-slate-400 line-through mono" id="product-price-fake"></span>
+        </div>
+
+        <div id="product-id" class="text-[11px] text-slate-400 mono mt-3"></div>
+
+        <div class="mt-8 grid grid-cols-2 gap-3">
+          <button id="product-add-cart" class="h-12 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition shadow-md shadow-indigo-200/60 flex items-center justify-center gap-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 002 1.6h9.7a2 2 0 002-1.6L23 6H6"/></svg>
+            Add to Cart
+          </button>
+          <button id="product-buy-now" class="h-12 rounded-xl border border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 text-slate-800 hover:text-indigo-700 text-sm font-semibold transition flex items-center justify-center gap-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><path d="M5 12l5 5L20 7"/></svg>
+            Buy Now
+          </button>
+        </div>
+
+        <div class="mt-7 p-4 rounded-2xl bg-slate-50 border border-slate-100 text-xs text-slate-600 leading-relaxed">
+          <span class="font-semibold text-slate-700">Why this product?</span>
+          <span id="product-why">A representative item from the REES46 eCommerce catalog (Oct 2019 – Jan 2020). Item, brand, and category come from the upstream BigQuery snapshot used to train the model.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Customers also viewed -->
+    <div>
+      <div class="flex items-end justify-between mb-4">
+        <h2 class="text-lg font-bold tracking-tight">Customers also viewed</h2>
+        <span id="alsoview-meta" class="text-[11px] mono text-slate-400"></span>
+      </div>
+      <div id="alsoview-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"></div>
+    </div>
+  </section>
+
+
+  <!-- ────────────────── SUB-VIEW: CART ────────────────── -->
+  <section id="sub-cart" class="hidden fade-in">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">Your cart</h1>
+        <p class="text-sm text-slate-500 mt-1" id="cart-summary">0 items</p>
+      </div>
+      <button onclick="setTab('shop','grid')" class="text-sm text-slate-500 hover:text-indigo-600 transition">← Continue shopping</button>
+    </div>
+
+    <div id="cart-empty" class="hidden py-24 text-center bg-white border border-slate-200 rounded-2xl ring-shadow">
+      <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-indigo-50 flex items-center justify-center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="1.6" class="w-7 h-7"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 002 1.6h9.7a2 2 0 002-1.6L23 6H6"/></svg>
+      </div>
+      <h3 class="text-base font-semibold text-slate-900">Your cart is empty</h3>
+      <p class="text-sm text-slate-500 mt-1.5">Browse the shop and add a few products to get started.</p>
+      <button onclick="setTab('shop','grid')" class="mt-5 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition">Go to shop</button>
+    </div>
+
+    <div id="cart-content" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div id="cart-lines" class="lg:col-span-2 space-y-3"></div>
+      <aside class="bg-white border border-slate-200 rounded-2xl ring-shadow p-5 h-fit lg:sticky lg:top-24">
+        <h3 class="text-sm font-semibold text-slate-900 mb-4">Order summary</h3>
+        <div class="flex justify-between text-sm text-slate-600 mb-2">
+          <span>Items</span><span id="cart-items-count" class="mono">0</span>
+        </div>
+        <div class="flex justify-between text-sm text-slate-600 mb-2">
+          <span>Subtotal</span><span id="cart-subtotal" class="mono">$0.00</span>
+        </div>
+        <div class="flex justify-between text-sm text-slate-600 mb-4">
+          <span>Shipping</span><span class="text-emerald-600 font-medium">Free</span>
+        </div>
+        <div class="border-t border-slate-200 pt-4 flex justify-between text-base font-semibold">
+          <span>Total</span><span id="cart-total" class="mono">$0.00</span>
+        </div>
+        <button onclick="buyAll()" id="buy-all-btn"
+          class="mt-5 w-full h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition shadow-md shadow-indigo-200/60">
+          Buy all items
+        </button>
+        <p class="text-[10px] text-slate-400 mt-3 text-center">Each purchase appends a <span class="mono">purchase</span> event to your session.</p>
+      </aside>
+    </div>
+  </section>
+
+</main>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════════════
+     METRICS VIEW
+     ════════════════════════════════════════════════════════════════════════════════ -->
+<main id="view-metrics" class="hidden max-w-[1440px] mx-auto px-6 py-6">
+
+  <div class="mb-7">
+    <h1 class="text-2xl font-bold tracking-tight">Model performance</h1>
+    <p class="text-sm text-slate-500 mt-1">GRU4Rec V9 trained on 1M REES46 users · validated on held-out sessions · monitored in production with Jensen-Shannon drift.</p>
+  </div>
+
+  <!-- KPI strip -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    <div class="kpi-card border border-slate-200 rounded-2xl ring-shadow p-5">
+      <div class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">NDCG@20</div>
+      <div class="mono text-3xl font-bold text-slate-900 mt-1.5" id="kpi-ndcg">0.2676</div>
+      <div class="text-[11px] text-emerald-600 font-medium mt-1.5">▲ vs T4Rec paper +5.1%</div>
+    </div>
+    <div class="kpi-card border border-slate-200 rounded-2xl ring-shadow p-5">
+      <div class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">HR@20</div>
+      <div class="mono text-3xl font-bold text-slate-900 mt-1.5" id="kpi-hr">0.4815</div>
+      <div class="text-[11px] text-emerald-600 font-medium mt-1.5">▲ vs T4Rec paper +9.1%</div>
+    </div>
+    <div class="kpi-card border border-slate-200 rounded-2xl ring-shadow p-5">
+      <div class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">vs Popularity</div>
+      <div class="mono text-3xl font-bold text-slate-900 mt-1.5" id="kpi-vspop">7.6×</div>
+      <div class="text-[11px] text-slate-500 mt-1.5">NDCG@20 over trivial baseline</div>
+    </div>
+    <div class="kpi-card border border-slate-200 rounded-2xl ring-shadow p-5">
+      <div class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">Catalog</div>
+      <div class="mono text-3xl font-bold text-slate-900 mt-1.5">222,864</div>
+      <div class="text-[11px] text-slate-500 mt-1.5">items indexed in FAISS</div>
     </div>
   </div>
 
-  <!-- RIGHT: panels -->
-  <div class="w-[340px] flex-shrink-0 flex flex-col gap-4">
-
-    <!-- Session panel -->
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-      <div class="px-4 pt-4 pb-3 border-b border-slate-800 flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Session Builder</h2>
-        <div class="flex gap-1">
-          <button onclick="loadPreset(1)" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2 py-1 rounded-md transition" title="1-event preset">1×</button>
-          <button onclick="loadPreset(2)" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2 py-1 rounded-md transition" title="5-event preset">5×</button>
-          <button onclick="loadPreset(3)" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 px-2 py-1 rounded-md transition" title="10-event preset">10×</button>
-        </div>
+  <!-- Training curve -->
+  <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6 mb-6">
+    <div class="flex items-start justify-between mb-1">
+      <div>
+        <h2 class="text-base font-semibold text-slate-900">Training progression</h2>
+        <p class="text-xs text-slate-500 mt-0.5">29 epochs · cosine LR schedule · early-stopped on val NDCG@20</p>
       </div>
-      <div id="session-list" class="max-h-[260px] overflow-y-auto px-3 py-2 space-y-1.5">
-        <div id="session-empty" class="py-8 text-center text-xs text-slate-500">
-          <svg class="w-8 h-8 mx-auto mb-2 opacity-25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
-          Click products to build your session
-        </div>
-      </div>
-      <div class="px-3 pb-3 pt-2 border-t border-slate-800 flex gap-2">
-        <button onclick="clearSession()" class="text-xs bg-slate-800 hover:bg-red-900/40 hover:text-red-400 text-slate-400 px-3 py-2 rounded-lg transition">Clear</button>
-        <button onclick="getRecommendations()" id="reco-btn"
-          class="flex-1 text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
-          Get Recommendations
-        </button>
+      <div class="hidden sm:flex gap-4 text-[11px]">
+        <span class="flex items-center gap-1.5"><span class="w-3 h-1 rounded-full bg-indigo-500"></span><span class="text-slate-600">Val NDCG@20</span></span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-1 rounded-full bg-rose-400"></span><span class="text-slate-600">Train loss</span></span>
       </div>
     </div>
+    <div class="relative h-72 mt-4">
+      <canvas id="train-chart"></canvas>
+    </div>
+  </div>
 
-    <!-- Reco panel (hidden until first call) -->
-    <div id="reco-panel" class="hidden bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-      <div class="px-4 pt-4 pb-3 border-b border-slate-800 flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Recommendations</h2>
-        <span id="reco-meta" class="text-[11px] mono text-slate-500"></span>
+  <!-- Comparison + Drift two-col -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+    <div class="lg:col-span-2 bg-white border border-slate-200 rounded-2xl ring-shadow p-6">
+      <h2 class="text-base font-semibold text-slate-900">Model comparison</h2>
+      <p class="text-xs text-slate-500 mt-0.5 mb-4">Session-based next-item prediction on REES46.</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-200">
+              <th class="text-left font-medium py-2.5">Model</th>
+              <th class="text-right font-medium py-2.5">NDCG@20</th>
+              <th class="text-right font-medium py-2.5">HR@20</th>
+              <th class="text-left font-medium py-2.5 pl-4">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="comparison-tbody"></tbody>
+        </table>
       </div>
-      <div id="reco-list" class="max-h-[380px] overflow-y-auto px-2 py-2 space-y-0.5"></div>
     </div>
 
     <!-- Drift panel -->
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-      <div class="px-4 pt-4 pb-3 border-b border-slate-800">
-        <h2 class="text-sm font-semibold">Distribution Drift Monitor</h2>
+    <div class="bg-white border border-slate-200 rounded-2xl ring-shadow overflow-hidden">
+      <div class="px-5 pt-5 pb-4 border-b border-slate-100">
+        <h2 class="text-base font-semibold text-slate-900">Distribution drift</h2>
         <p class="text-[11px] text-slate-500 mt-0.5">Train Jan 2020 vs Test Mar 2020 (COVID period)</p>
       </div>
-      <div id="drift-content" class="px-4 py-3">
+      <div id="drift-content" class="px-5 py-4">
         <div class="skeleton h-3 w-3/4 mb-2"></div>
         <div class="skeleton h-2 w-full mb-2"></div>
         <div class="skeleton h-2 w-1/2"></div>
       </div>
     </div>
-
   </div>
-</div>
 
-<!-- EVENT TYPE MODAL -->
-<div id="evt-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="closeModal(event)">
-  <div class="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-72 shadow-2xl" onclick="event.stopPropagation()">
-    <div class="flex items-center gap-3 mb-4">
-      <div id="modal-icon" class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border"></div>
-      <div class="min-w-0">
-        <div id="modal-brand" class="font-semibold text-sm truncate"></div>
-        <div id="modal-meta" class="text-xs text-slate-400 truncate"></div>
-      </div>
+  <!-- Cohort -->
+  <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6 mb-6">
+    <h2 class="text-base font-semibold text-slate-900">Cohort breakdown</h2>
+    <p class="text-xs text-slate-500 mt-0.5 mb-4" id="cohort-note">Recall@10 by user maturity. Loaded from diagnostics.</p>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-200">
+            <th class="text-left font-medium py-2.5">Cohort</th>
+            <th class="text-right font-medium py-2.5">Users</th>
+            <th class="text-right font-medium py-2.5">Share</th>
+            <th class="text-right font-medium py-2.5">GRU4Rec R@10</th>
+            <th class="text-right font-medium py-2.5">Popularity R@10</th>
+            <th class="text-center font-medium py-2.5">Winner</th>
+          </tr>
+        </thead>
+        <tbody id="cohort-tbody"></tbody>
+      </table>
     </div>
-    <p class="text-xs text-slate-400 mb-3">Add to session as:</p>
-    <div class="grid grid-cols-3 gap-2 mb-3">
-      <button onclick="confirmAdd('view')"
-        class="bg-blue-500/15 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 text-xs py-3 rounded-xl transition font-medium">
-        👁 View
-      </button>
-      <button onclick="confirmAdd('cart')"
-        class="bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs py-3 rounded-xl transition font-medium">
-        🛒 Cart
-      </button>
-      <button onclick="confirmAdd('purchase')"
-        class="bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs py-3 rounded-xl transition font-medium">
-        ✓ Buy
-      </button>
-    </div>
-    <button onclick="closeModal()" class="w-full text-xs text-slate-500 hover:text-slate-300 py-1.5 transition">Cancel</button>
   </div>
-</div>
 
+  <!-- Hyperparameters / model card -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6">
+      <h2 class="text-base font-semibold text-slate-900 mb-1">Architecture</h2>
+      <p class="text-xs text-slate-500 mb-4">Single-layer GRU + cosine-similarity scoring head</p>
+      <dl id="hparam-list" class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm"></dl>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl ring-shadow p-6">
+      <h2 class="text-base font-semibold text-slate-900 mb-1">Training run</h2>
+      <p class="text-xs text-slate-500 mb-4">Vertex AI · A100 40GB · 10h 46m wall-clock</p>
+      <dl id="model-meta-list" class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm"></dl>
+    </div>
+  </div>
+
+</main>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════════════
+     SCRIPT
+     ════════════════════════════════════════════════════════════════════════════════ -->
 <script>
-// ── Category metadata ──────────────────────────────────────────────────────
+// ── Category metadata (light-theme tints) ───────────────────────────────────
 
 const CAT = {
-  electronics:  { color:'#60a5fa', bg:'#172554', border:'#1d4ed860',
-    icon:'<path d="M5 2h14a2 2 0 012 2v16a2 2 0 01-2 2H5a2 2 0 01-2-2V4a2 2 0 012-2z"/><circle cx="12" cy="18" r="1"/>' },
-  computers:    { color:'#a78bfa', bg:'#1e1b4b', border:'#7c3aed50',
+  electronics:  { color:'#4f46e5', bg:'#eef2ff', accent:'#c7d2fe',
+    icon:'<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r="1"/>' },
+  computers:    { color:'#7c3aed', bg:'#f3e8ff', accent:'#ddd6fe',
     icon:'<rect x="2" y="3" width="20" height="13" rx="2"/><polyline points="8 21 12 17 16 21"/>' },
-  appliances:   { color:'#2dd4bf', bg:'#022c22', border:'#0d948660',
+  appliances:   { color:'#0d9488', bg:'#ccfbf1', accent:'#99f6e4',
     icon:'<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>' },
-  furniture:    { color:'#fbbf24', bg:'#1c1007', border:'#b4530950',
+  furniture:    { color:'#b45309', bg:'#fef3c7', accent:'#fde68a',
     icon:'<path d="M20 9V7a2 2 0 00-2-2H6a2 2 0 00-2 2v2"/><path d="M2 11v5a2 2 0 002 2h16a2 2 0 002-2v-5a2 2 0 00-4 0v2H6v-2a2 2 0 00-4 0z"/><line x1="6" y1="19" x2="6" y2="21"/><line x1="18" y1="19" x2="18" y2="21"/>' },
-  sport:        { color:'#4ade80', bg:'#052e16', border:'#15803d50',
+  sport:        { color:'#15803d', bg:'#dcfce7', accent:'#bbf7d0',
     icon:'<circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><path d="M3 18h3"/><path d="M15 18h6"/><path d="M10.5 4.5a2 2 0 101.5 3.3L15 10l-2 6"/><path d="M9 13H4"/>' },
-  kids:         { color:'#f472b6', bg:'#2d0a1e', border:'#be185d50',
-    icon:'<path d="M12 2a2 2 0 100 4 2 2 0 000-4zm0 5c-3 0-5 2-5 5v2h10v-2c0-3-2-5-5-5z"/><line x1="12" y1="14" x2="12" y2="19"/><line x1="9" y1="19" x2="15" y2="19"/>' },
-  construction: { color:'#fb923c', bg:'#1c0a01', border:'#c2410c50',
+  kids:         { color:'#be185d', bg:'#fce7f3', accent:'#fbcfe8',
+    icon:'<circle cx="12" cy="6" r="3"/><path d="M7 22v-7l-1.5-3.5a2 2 0 013.7-1L11 13l1-1 1 1 1.8-2.5a2 2 0 013.7 1L17 15v7"/>' },
+  construction: { color:'#c2410c', bg:'#fed7aa', accent:'#fdba74',
     icon:'<path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>' },
-  auto:         { color:'#94a3b8', bg:'#0f172a', border:'#47556960',
+  auto:         { color:'#475569', bg:'#e2e8f0', accent:'#cbd5e1',
     icon:'<path d="M5 17H3a2 2 0 01-2-2v-4l2-6h14l2 6v4a2 2 0 01-2 2h-2"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="17.5" r="2.5"/>' },
-  apparel:      { color:'#fb7185', bg:'#1c0a11', border:'#be123c50',
+  apparel:      { color:'#be123c', bg:'#ffe4e6', accent:'#fecdd3',
     icon:'<path d="M20.38 3.46L16 2a4 4 0 01-8 0L3.62 3.46a2 2 0 00-1.34 2.23l.58 3.57a1 1 0 00.99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 002-2V10h2.15a1 1 0 00.99-.84l.58-3.57a2 2 0 00-1.34-2.23z"/>' },
-  accessories:  { color:'#22d3ee', bg:'#042f2e', border:'#0891b250',
+  accessories:  { color:'#0891b2', bg:'#cffafe', accent:'#a5f3fc',
     icon:'<path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/>' },
-  medicine:     { color:'#f87171', bg:'#1c0606', border:'#dc262650',
+  medicine:     { color:'#dc2626', bg:'#fee2e2', accent:'#fecaca',
     icon:'<path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>' },
-  unknown:      { color:'#6b7280', bg:'#111827', border:'#37415150',
+  unknown:      { color:'#64748b', bg:'#f1f5f9', accent:'#e2e8f0',
     icon:'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
 };
 
 const EVT = {
-  view:     'bg-blue-500/20 text-blue-300 border border-blue-500/30',
-  cart:     'bg-amber-500/20 text-amber-300 border border-amber-500/30',
-  purchase: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+  view:     { cls:'bg-indigo-50 text-indigo-700 border border-indigo-100', icon:'👁', label:'view' },
+  cart:     { cls:'bg-amber-50  text-amber-700  border border-amber-100',  icon:'🛒', label:'cart' },
+  purchase: { cls:'bg-emerald-50 text-emerald-700 border border-emerald-100', icon:'✓', label:'purchase' },
 };
 
 const PRESETS = {
@@ -224,42 +487,56 @@ const PRESETS = {
   ],
 };
 
-// ── State ──────────────────────────────────────────────────────────────────
+// ── State ───────────────────────────────────────────────────────────────────
 
 let catalog = {};
+let metrics = {};
 let session = [];
+let cart = [];
+let activeTab = 'shop';
+let activeSub = 'grid';
 let activeCat = 'all';
 let searchQ = '';
-let showN = 20;
-let pendingId = null;
+let showN = 24;
+let currentProductId = null;
+let alsoViewCache = {};
+let chart = null;
 
-// ── Init ───────────────────────────────────────────────────────────────────
+// ── Init ────────────────────────────────────────────────────────────────────
 
 async function init() {
   try {
-    catalog = await fetch('/catalog.json').then(r => r.json());
-  } catch (e) { console.error('catalog:', e); }
+    [catalog, metrics] = await Promise.all([
+      fetch('/catalog.json').then(r => r.json()),
+      fetch('/metrics.json').then(r => r.json()),
+    ]);
+  } catch (e) { console.error('catalog/metrics fetch failed:', e); }
 
+  loadCartFromStorage();
   buildTabs();
   renderGrid();
   renderSession();
+  renderCartBadge();
+  renderMetricsView();
   checkHealth();
   loadDrift();
 
   document.getElementById('search-input').addEventListener('input', e => {
     searchQ = e.target.value.trim().toLowerCase();
-    showN = 20;
+    showN = 24;
     renderGrid();
   });
+
+  document.getElementById('product-add-cart').onclick = () => addToCart(currentProductId);
+  document.getElementById('product-buy-now').onclick   = () => buyDirect(currentProductId);
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
-function cm(c1) { return CAT[c1] || CAT.unknown; }
+const cm  = c1 => CAT[c1] || CAT.unknown;
+const fmt = s  => (s||'').replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
 
-function fmt(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
-
-function icon(c1, sz=18) {
+function icon(c1, sz = 18) {
   const m = cm(c1);
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
     style="width:${sz}px;height:${sz}px;color:${m.color};display:block;flex-shrink:0">${m.icon}</svg>`;
@@ -267,11 +544,143 @@ function icon(c1, sz=18) {
 
 function inSession(id) { return session.some(e => e.item_id === id); }
 
-// ── Tabs ───────────────────────────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const el = document.createElement('div');
+  el.className = 'toast';
+  const colors = { success: '#10b981', cart: '#6366f1', purchase: '#059669' };
+  el.innerHTML = `<span class="w-2 h-2 rounded-full" style="background:${colors[type]||colors.success}"></span>${msg}`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2200);
+}
+
+// ── Tab + sub-view routing ──────────────────────────────────────────────────
+
+function setTab(tab, sub = null) {
+  activeTab = tab;
+  document.getElementById('view-shop').classList.toggle('hidden', tab !== 'shop');
+  document.getElementById('view-metrics').classList.toggle('hidden', tab !== 'metrics');
+  document.getElementById('tab-shop').classList.toggle('active', tab === 'shop');
+  document.getElementById('tab-metrics').classList.toggle('active', tab === 'metrics');
+
+  if (tab === 'shop') {
+    setSubView(sub || activeSub || 'grid');
+  } else if (tab === 'metrics') {
+    if (chart) chart.resize();
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function setSubView(sub) {
+  activeSub = sub;
+  ['grid','product','cart'].forEach(s => {
+    document.getElementById('sub-'+s).classList.toggle('hidden', s !== sub);
+  });
+  // re-trigger fade animation
+  const el = document.getElementById('sub-'+sub);
+  el.classList.remove('fade-in'); void el.offsetWidth; el.classList.add('fade-in');
+
+  if (sub === 'cart') renderCart();
+}
+
+// ── Cart persistence ────────────────────────────────────────────────────────
+
+function loadCartFromStorage() {
+  try {
+    const raw = localStorage.getItem('recosys_cart');
+    if (raw) cart = JSON.parse(raw);
+  } catch {}
+}
+function saveCartToStorage() {
+  try { localStorage.setItem('recosys_cart', JSON.stringify(cart)); } catch {}
+}
+
+// ── Session logging (single entry point) ────────────────────────────────────
+
+function logEvent(itemId, eventType) {
+  if (!itemId) return;
+  if (session.length >= 20) {
+    // drop oldest to make room — better UX than blocking
+    session.shift();
+  }
+  session.push({ item_id: itemId, event_type: eventType });
+  renderSession();
+  renderGrid();
+}
+
+// ── Cart ops ────────────────────────────────────────────────────────────────
+
+function addToCart(itemId) {
+  if (!itemId) return;
+  const existing = cart.find(c => c.item_id === itemId);
+  if (existing) existing.qty += 1;
+  else cart.push({ item_id: itemId, qty: 1 });
+  saveCartToStorage();
+  renderCartBadge();
+  if (activeSub === 'cart') renderCart();
+  logEvent(itemId, 'cart');
+  const item = catalog[itemId] || {};
+  toast(`Added ${item.brand || 'item'} to cart`, 'cart');
+}
+
+function removeFromCart(itemId) {
+  cart = cart.filter(c => c.item_id !== itemId);
+  saveCartToStorage();
+  renderCartBadge();
+  renderCart();
+}
+
+function changeQty(itemId, delta) {
+  const line = cart.find(c => c.item_id === itemId);
+  if (!line) return;
+  line.qty += delta;
+  if (line.qty <= 0) cart = cart.filter(c => c.item_id !== itemId);
+  saveCartToStorage();
+  renderCartBadge();
+  renderCart();
+}
+
+function buyItem(itemId) {
+  if (!itemId) return;
+  logEvent(itemId, 'purchase');
+  cart = cart.filter(c => c.item_id !== itemId);
+  saveCartToStorage();
+  renderCartBadge();
+  renderCart();
+  const item = catalog[itemId] || {};
+  toast(`Purchased ${item.brand || 'item'} · session updated`, 'purchase');
+}
+
+function buyDirect(itemId) {
+  if (!itemId) return;
+  logEvent(itemId, 'purchase');
+  const item = catalog[itemId] || {};
+  toast(`Purchased ${item.brand || 'item'} · session updated`, 'purchase');
+}
+
+function buyAll() {
+  if (!cart.length) return;
+  const ids = cart.map(c => c.item_id);
+  ids.forEach(id => logEvent(id, 'purchase'));
+  cart = [];
+  saveCartToStorage();
+  renderCartBadge();
+  renderCart();
+  toast(`Purchased ${ids.length} items · session updated`, 'purchase');
+}
+
+function renderCartBadge() {
+  const badge = document.getElementById('cart-badge');
+  const total = cart.reduce((s, c) => s + c.qty, 0);
+  badge.textContent = total;
+  badge.classList.toggle('hidden', total === 0);
+}
+
+// ── Category tabs ───────────────────────────────────────────────────────────
 
 function buildTabs() {
-  const counts = {all:Object.keys(catalog).length};
-  for (const v of Object.values(catalog)) counts[v.c1]=(counts[v.c1]||0)+1;
+  const counts = { all: Object.keys(catalog).length };
+  for (const v of Object.values(catalog)) counts[v.c1] = (counts[v.c1]||0) + 1;
 
   const order = ['all','electronics','computers','appliances','furniture',
                  'sport','kids','construction','auto','apparel','accessories','medicine','unknown'];
@@ -282,30 +691,49 @@ function buildTabs() {
     const n = counts[cat];
     if (!n && cat !== 'all') continue;
     const active = activeCat === cat;
-    const m = CAT[cat] || CAT.unknown;
     const btn = document.createElement('button');
-    btn.className = `tab-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border ${
-      active ? 'active' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+    btn.className = `tab-pill flex items-center gap-1.5 px-3.5 h-9 rounded-xl text-xs font-medium whitespace-nowrap border ${
+      active ? 'active' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200 hover:text-slate-900'
     }`;
     const ico = cat === 'all'
-      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:13px;height:13px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:13px;height:13px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`
       : icon(cat, 13);
-    btn.innerHTML = `${ico}<span>${cat==='all'?'All':fmt(cat)}</span><span class="mono opacity-40 text-[10px]">${n||0}</span>`;
-    btn.onclick = () => { activeCat = cat; showN = 20; buildTabs(); renderGrid(); };
+    btn.innerHTML = `${ico}<span>${cat==='all'?'All products':fmt(cat)}</span><span class="mono opacity-60 text-[10px]">${n||0}</span>`;
+    btn.onclick = () => { activeCat = cat; showN = 24; buildTabs(); renderGrid(); };
     el.appendChild(btn);
   }
 }
 
-// ── Product grid ───────────────────────────────────────────────────────────
+// ── Grid ────────────────────────────────────────────────────────────────────
 
 function filtered() {
   return Object.entries(catalog).filter(([id, item]) => {
     if (activeCat !== 'all' && item.c1 !== activeCat) return false;
-    if (searchQ && !item.brand.toLowerCase().includes(searchQ) &&
+    if (searchQ &&
+        !item.brand.toLowerCase().includes(searchQ) &&
         !item.c2.toLowerCase().includes(searchQ) &&
         !id.includes(searchQ)) return false;
     return true;
   });
+}
+
+function productCardHTML(id, item, opts = {}) {
+  const m = cm(item.c1);
+  const tagged = inSession(id);
+  return `
+    <div class="pcard relative bg-white border border-slate-200 rounded-2xl overflow-hidden cursor-pointer">
+      <div class="aspect-square flex items-center justify-center" style="background:${m.bg}">
+        <div style="color:${m.color}">${icon(item.c1, opts.iconSize || 56)}</div>
+        ${tagged ? `<div class="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+          <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" style="width:8px;height:8px"><path d="M1.5 5l2.5 2.5 4.5-4.5"/></svg>
+        </div>` : ''}
+      </div>
+      <div class="p-3.5">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-medium truncate">${fmt(item.c2)}</div>
+        <div class="text-sm font-semibold text-slate-900 truncate mt-0.5">${item.brand}</div>
+        <div class="mono text-sm font-bold mt-1.5" style="color:${m.color}">$${(item.price||0).toFixed(2)}</div>
+      </div>
+    </div>`;
 }
 
 function renderGrid() {
@@ -315,82 +743,162 @@ function renderGrid() {
   grid.innerHTML = '';
 
   if (!shown.length) {
-    grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-500 text-sm">No items match your search</div>';
+    grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">No products match that search.</div>';
     document.getElementById('grid-count').textContent = '';
     document.getElementById('load-more-wrap').classList.add('hidden');
     return;
   }
 
   for (const [id, item] of shown) {
-    const m = cm(item.c1);
-    const tagged = inSession(id);
-    const card = document.createElement('div');
-    card.className = 'product-card relative rounded-xl border cursor-pointer select-none';
-    card.style.cssText = `background:${m.bg};border-color:${m.border};`;
-    card.onclick = () => openModal(id);
-    card.innerHTML = `
-      <div class="p-3.5">
-        <div class="w-9 h-9 rounded-lg mb-2.5 flex items-center justify-center" style="background:rgba(0,0,0,0.35)">
-          ${icon(item.c1, 18)}
-        </div>
-        <div class="text-xs font-semibold text-slate-100 truncate leading-snug">${item.brand}</div>
-        <div class="text-[10px] text-slate-400 truncate mt-0.5 capitalize leading-snug">${fmt(item.c2)}</div>
-        <div class="text-xs font-bold mt-1.5" style="color:${m.color}">$${item.price.toFixed(2)}</div>
-      </div>
-      <div class="hover-overlay absolute inset-0 rounded-xl flex items-end p-2"
-        style="background:linear-gradient(to top,rgba(0,0,0,0.88) 55%,transparent)">
-        <div class="w-full text-center text-[11px] font-semibold text-white bg-blue-600/90 py-1.5 rounded-lg">
-          + Add to Session
-        </div>
-      </div>
-      ${tagged ? `<div class="absolute top-2 right-2 w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
-        <svg viewBox="0 0 10 10" fill="none" stroke="white" stroke-width="1.5" style="width:7px;height:7px">
-          <path d="M1.5 5l2.5 2.5 4.5-4.5"/>
-        </svg>
-      </div>` : ''}
-    `;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = productCardHTML(id, item);
+    const card = wrapper.firstElementChild;
+    card.onclick = () => openProduct(id);
     grid.appendChild(card);
   }
 
-  document.getElementById('grid-count').textContent = `${shown.length} / ${items.length}`;
-  const lm = document.getElementById('load-more-wrap');
-  items.length > showN ? lm.classList.remove('hidden') : lm.classList.add('hidden');
+  document.getElementById('grid-count').textContent = `${shown.length} of ${items.length} products`;
+  document.getElementById('load-more-wrap').classList.toggle('hidden', items.length <= showN);
 }
 
-function showMore() { showN += 20; renderGrid(); }
+function showMore() { showN += 24; renderGrid(); }
 
-// ── Modal ──────────────────────────────────────────────────────────────────
+// ── Product detail ──────────────────────────────────────────────────────────
 
-function openModal(id) {
-  pendingId = id;
-  const item = catalog[id] || {};
+function openProduct(id) {
+  if (!catalog[id]) return;
+  currentProductId = id;
+  const item = catalog[id];
   const m = cm(item.c1);
-  const el = document.getElementById('modal-icon');
-  el.style.cssText = `background:${m.bg};border-color:${m.border};`;
-  el.innerHTML = icon(item.c1, 22);
-  document.getElementById('modal-brand').textContent = `${item.brand || 'Unknown'}  ·  #${id}`;
-  document.getElementById('modal-meta').textContent = `${fmt(item.c2)}  ·  $${(item.price||0).toFixed(2)}`;
-  document.getElementById('evt-modal').classList.remove('hidden');
+
+  // Hero
+  const hero = document.getElementById('product-hero');
+  hero.style.cssText = `background:${m.bg};border-color:${m.accent};`;
+  hero.innerHTML = `
+    <div style="color:${m.color}">${icon(item.c1, 180)}</div>
+    <div class="absolute top-5 left-5 mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full bg-white/70 backdrop-blur"
+         style="color:${m.color}">${fmt(item.c1)}</div>`;
+
+  document.getElementById('product-breadcrumb').textContent = `${fmt(item.c1)} · ${fmt(item.c2)}`;
+  document.getElementById('product-title').textContent      = item.brand;
+  document.getElementById('product-subtitle').textContent   = fmt(item.c2);
+  document.getElementById('product-price').textContent      = `$${item.price.toFixed(2)}`;
+  document.getElementById('product-price-fake').textContent = `$${(item.price * 1.25).toFixed(2)}`;
+  document.getElementById('product-id').textContent         = `Item #${id}`;
+
+  setSubView('product');
+  logEvent(id, 'view');
+  loadAlsoView(id);
 }
 
-function closeModal(e) {
-  if (!e || e.target === document.getElementById('evt-modal')) {
-    document.getElementById('evt-modal').classList.add('hidden');
-    pendingId = null;
+async function loadAlsoView(productId) {
+  const grid = document.getElementById('alsoview-grid');
+  const meta = document.getElementById('alsoview-meta');
+  meta.textContent = 'Loading…';
+
+  if (alsoViewCache[productId]) {
+    renderAlsoView(alsoViewCache[productId], productId);
+    return;
+  }
+
+  // Skeleton
+  grid.innerHTML = Array.from({length:6}).map(() =>
+    '<div class="aspect-square skeleton rounded-2xl"></div>').join('');
+
+  try {
+    const recentSession = session.slice(-5);
+    const seedSession = recentSession.length
+      ? recentSession
+      : [{ item_id: productId, event_type: 'view' }];
+
+    const r = await fetch('/api/recommend', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ session: seedSession, top_k: 12 })
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    alsoViewCache[productId] = data;
+    renderAlsoView(data, productId);
+  } catch (e) {
+    grid.innerHTML = '';
+    meta.textContent = 'Recommendations unavailable';
   }
 }
 
-function confirmAdd(evtType) {
-  if (!pendingId) return;
-  if (session.length >= 20) { alert('Session capped at 20 events.'); return; }
-  session.push({ item_id: pendingId, event_type: evtType });
-  document.getElementById('evt-modal').classList.add('hidden');
-  pendingId = null;
-  renderSession();
-  renderGrid();
+function renderAlsoView(data, productId) {
+  const grid = document.getElementById('alsoview-grid');
+  const meta = document.getElementById('alsoview-meta');
+  const ids = (data.recommendations || []).filter(id => id !== productId).slice(0, 6);
+  meta.textContent = data.model_version ? `${data.model_version}` : '';
+  grid.innerHTML = '';
+  for (const id of ids) {
+    const item = catalog[id];
+    if (!item) continue;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = productCardHTML(id, item, { iconSize: 44 });
+    wrapper.firstElementChild.onclick = () => openProduct(id);
+    grid.appendChild(wrapper.firstElementChild);
+  }
+  if (!grid.children.length) meta.textContent = 'No related items found';
 }
 
-// ── Session ────────────────────────────────────────────────────────────────
+// ── Cart view ───────────────────────────────────────────────────────────────
+
+function renderCart() {
+  const empty = document.getElementById('cart-empty');
+  const content = document.getElementById('cart-content');
+  const lines = document.getElementById('cart-lines');
+  const summary = document.getElementById('cart-summary');
+
+  if (!cart.length) {
+    empty.classList.remove('hidden');
+    content.classList.add('hidden');
+    summary.textContent = '0 items';
+    return;
+  }
+  empty.classList.add('hidden');
+  content.classList.remove('hidden');
+
+  const totalQty = cart.reduce((s,c) => s + c.qty, 0);
+  summary.textContent = `${totalQty} ${totalQty===1?'item':'items'} · ready to buy`;
+
+  lines.innerHTML = '';
+  let subtotal = 0;
+  for (const line of cart) {
+    const item = catalog[line.item_id];
+    if (!item) continue;
+    const m = cm(item.c1);
+    subtotal += item.price * line.qty;
+    const row = document.createElement('div');
+    row.className = 'bg-white border border-slate-200 rounded-2xl ring-shadow p-4 flex gap-4 items-center';
+    row.innerHTML = `
+      <div class="w-20 h-20 rounded-xl flex items-center justify-center flex-shrink-0" style="background:${m.bg}">
+        <div style="color:${m.color}">${icon(item.c1, 36)}</div>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-medium">${fmt(item.c2)}</div>
+        <div class="text-base font-semibold text-slate-900 truncate">${item.brand}</div>
+        <div class="mono text-sm font-bold mt-1" style="color:${m.color}">$${item.price.toFixed(2)}</div>
+      </div>
+      <div class="flex items-center border border-slate-200 rounded-xl">
+        <button onclick="changeQty('${line.item_id}', -1)" class="w-9 h-9 text-slate-500 hover:text-indigo-600 transition">−</button>
+        <span class="mono text-sm font-semibold w-8 text-center">${line.qty}</span>
+        <button onclick="changeQty('${line.item_id}', 1)"  class="w-9 h-9 text-slate-500 hover:text-indigo-600 transition">+</button>
+      </div>
+      <button onclick="buyItem('${line.item_id}')" class="px-4 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition">Buy</button>
+      <button onclick="removeFromCart('${line.item_id}')" class="text-slate-400 hover:text-rose-500 transition w-9 h-9 flex items-center justify-center" title="Remove">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="w-4 h-4"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+      </button>`;
+    lines.appendChild(row);
+  }
+
+  document.getElementById('cart-items-count').textContent = totalQty;
+  document.getElementById('cart-subtotal').textContent = `$${subtotal.toFixed(2)}`;
+  document.getElementById('cart-total').textContent    = `$${subtotal.toFixed(2)}`;
+}
+
+// ── Session sidebar ─────────────────────────────────────────────────────────
 
 function renderSession() {
   const list = document.getElementById('session-list');
@@ -408,24 +916,23 @@ function renderSession() {
     const m = cm(item.c1);
     const ec = EVT[ev.event_type] || EVT.view;
     const row = document.createElement('div');
-    row.className = 'flex items-center gap-2 px-2 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-800 group transition';
+    row.className = 'flex items-center gap-2 px-2 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 group transition';
     row.innerHTML = `
-      <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:${m.bg}">
-        ${icon(item.c1, 14)}
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:${m.bg}">
+        <div style="color:${m.color}">${icon(item.c1, 16)}</div>
       </div>
       <div class="flex-1 min-w-0">
-        <div class="text-xs font-medium text-slate-200 truncate">${item.brand || ev.item_id}</div>
-        <div class="text-[10px] text-slate-500 truncate capitalize">${fmt(item.c2||'')}</div>
+        <div class="text-xs font-medium text-slate-800 truncate">${item.brand || ev.item_id}</div>
+        <div class="text-[10px] text-slate-500 truncate">${fmt(item.c2||'')}</div>
       </div>
-      <span class="text-[10px] px-1.5 py-0.5 rounded-md flex-shrink-0 ${ec}">${ev.event_type}</span>
-      <button onclick="removeItem(${i})"
-        class="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition text-xs flex-shrink-0 ml-1">✕</button>
-    `;
+      <span class="text-[10px] px-1.5 py-0.5 rounded-md flex-shrink-0 font-medium ${ec.cls}">${ec.label}</span>
+      <button onclick="removeSessionItem(${i})"
+        class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 transition text-xs flex-shrink-0">✕</button>`;
     list.appendChild(row);
   });
 }
 
-function removeItem(i) { session.splice(i, 1); renderSession(); renderGrid(); }
+function removeSessionItem(i) { session.splice(i, 1); renderSession(); renderGrid(); }
 function clearSession() {
   session = [];
   renderSession();
@@ -433,16 +940,16 @@ function clearSession() {
   document.getElementById('reco-panel').classList.add('hidden');
 }
 function loadPreset(n) {
-  session = PRESETS[n].map(e=>({...e}));
+  session = PRESETS[n].map(e => ({...e}));
   renderSession();
   renderGrid();
   document.getElementById('reco-panel').classList.add('hidden');
 }
 
-// ── Recommendations ────────────────────────────────────────────────────────
+// ── Recommendations (sidebar) ───────────────────────────────────────────────
 
 async function getRecommendations() {
-  if (!session.length) { alert('Add at least one item to your session first.'); return; }
+  if (!session.length) { toast('Add at least one product to your session first.', 'cart'); return; }
   const btn = document.getElementById('reco-btn');
   btn.disabled = true;
   btn.textContent = 'Loading…';
@@ -450,18 +957,18 @@ async function getRecommendations() {
     const res = await fetch('/api/recommend', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({session, top_k:20}),
+      body: JSON.stringify({ session, top_k: 20 })
     });
     if (!res.ok) {
-      const body = await res.json().catch(()=>({}));
-      const msg = res.status===503 ? 'Model warming up — retry in ~30s.'
-        : res.status===422 ? 'None of these items are in the model vocabulary. Try a preset session.'
+      const body = await res.json().catch(() => ({}));
+      const msg = res.status === 503 ? 'Model warming up — retry in ~30s.'
+        : res.status === 422 ? 'None of these items are in the model vocabulary. Try a preset session.'
         : body.detail || body.error || `HTTP ${res.status}`;
       throw new Error(msg);
     }
     renderRecommendations(await res.json());
-  } catch(e) {
-    alert(e.message);
+  } catch (e) {
+    toast(e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Get Recommendations';
@@ -470,25 +977,25 @@ async function getRecommendations() {
 
 function renderRecommendations(data) {
   document.getElementById('reco-meta').textContent =
-    `${data.known_items}/${data.session_length} known · ${data.model_version}`;
+    `${data.known_items}/${data.session_length} matched · ${data.model_version}`;
   const list = document.getElementById('reco-list');
   list.innerHTML = '';
   data.recommendations.forEach((id, rank) => {
     const item = catalog[id] || {};
     const m = cm(item.c1);
     const row = document.createElement('div');
-    row.className = 'flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-slate-800/60 transition';
+    row.className = 'flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-indigo-50 cursor-pointer transition';
+    row.onclick = () => openProduct(id);
     row.innerHTML = `
-      <div class="mono text-[10px] text-slate-600 w-4 text-right flex-shrink-0">${rank+1}</div>
-      <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:${m.bg}">
-        ${icon(item.c1, 16)}
+      <div class="mono text-[10px] text-slate-400 w-5 text-right flex-shrink-0">${rank+1}</div>
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background:${m.bg}">
+        <div style="color:${m.color}">${icon(item.c1, 18)}</div>
       </div>
       <div class="flex-1 min-w-0">
-        <div class="text-xs font-medium text-slate-200 truncate">${item.brand||'Unknown'}</div>
-        <div class="text-[10px] text-slate-500 truncate capitalize">${fmt(item.c2||'item')} · $${(item.price||0).toFixed(2)}</div>
+        <div class="text-xs font-semibold text-slate-800 truncate">${item.brand||'Unknown'}</div>
+        <div class="text-[10px] text-slate-500 truncate">${fmt(item.c2||'item')} · $${(item.price||0).toFixed(2)}</div>
       </div>
-      <div class="w-1.5 h-1.5 rounded-full flex-shrink-0 opacity-50" style="background:${m.color}"></div>
-    `;
+      <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background:${m.color}"></div>`;
     list.appendChild(row);
   });
   const panel = document.getElementById('reco-panel');
@@ -496,7 +1003,7 @@ function renderRecommendations(data) {
   panel.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
-// ── Health ─────────────────────────────────────────────────────────────────
+// ── Health ──────────────────────────────────────────────────────────────────
 
 async function checkHealth() {
   const badge = document.getElementById('status-badge');
@@ -505,20 +1012,20 @@ async function checkHealth() {
     if (r.ok) {
       const d = await r.json();
       badge.innerHTML = `
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-        <span class="text-emerald-400">${(d.n_items_indexed||0).toLocaleString()} items · live</span>`;
-    } else if (r.status===503) {
-      badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse"></span><span class="text-yellow-400">Warming up…</span>`;
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        <span class="text-[11px] text-emerald-700 font-medium">${(d.n_items_indexed||0).toLocaleString()} items · live</span>`;
+    } else if (r.status === 503) {
+      badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span><span class="text-[11px] text-amber-700">Warming up…</span>`;
       setTimeout(checkHealth, 20000);
     } else {
-      badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span><span class="text-red-400">Error</span>`;
+      badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span><span class="text-[11px] text-rose-700">Error</span>`;
     }
   } catch {
-    badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span><span class="text-red-400">Offline</span>`;
+    badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span><span class="text-[11px] text-rose-700">Offline</span>`;
   }
 }
 
-// ── Drift ──────────────────────────────────────────────────────────────────
+// ── Drift ───────────────────────────────────────────────────────────────────
 
 async function loadDrift() {
   const el = document.getElementById('drift-content');
@@ -531,45 +1038,210 @@ async function loadDrift() {
     const pct = Math.min(100, Math.round(jsd / (thr * 2.5) * 100));
     const alerting = d.alert === true;
     el.innerHTML = `
-      <div class="space-y-3">
+      <div class="space-y-4">
         <div class="flex items-center justify-between">
-          <span class="mono text-[11px] text-slate-300 font-medium">JSD = ${jsd.toFixed(4)}</span>
-          <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full ${alerting?'bg-amber-500/20 text-amber-400':'bg-emerald-500/20 text-emerald-400'}">
+          <div>
+            <div class="text-[11px] text-slate-500 uppercase tracking-wider font-medium">JSD</div>
+            <div class="mono text-2xl font-bold text-slate-900 mt-0.5">${jsd.toFixed(4)}</div>
+          </div>
+          <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full ${alerting?'bg-amber-100 text-amber-800':'bg-emerald-100 text-emerald-800'}">
             ${alerting ? '⚠ DRIFT DETECTED' : '✓ STABLE'}
           </span>
         </div>
         <div>
-          <div class="relative h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div class="relative h-2 bg-slate-100 rounded-full overflow-hidden">
             <div class="h-full rounded-full ${alerting?'bg-amber-500':'bg-emerald-500'}" style="width:${pct}%"></div>
-            <div class="absolute inset-y-0 w-0.5 bg-slate-400/50" style="left:40%"></div>
+            <div class="absolute inset-y-0 w-0.5 bg-slate-400" style="left:40%"></div>
           </div>
-          <div class="flex justify-between text-[9px] text-slate-600 mt-0.5 px-0.5">
+          <div class="flex justify-between text-[10px] text-slate-500 mt-1.5 px-0.5">
             <span>0</span><span>threshold ${thr}</span><span>0.25</span>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-2 text-[11px]">
-          <div class="bg-slate-800/50 rounded-lg p-2.5">
-            <div class="text-slate-500 text-[10px]">Top-50 overlap</div>
-            <div class="font-semibold text-slate-200 mt-0.5">${(d.top50_item_overlap_pct||0).toFixed(1)}%</div>
+          <div class="bg-slate-50 rounded-xl p-3">
+            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Top-50 overlap</div>
+            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.top50_item_overlap_pct||0).toFixed(1)}%</div>
           </div>
-          <div class="bg-slate-800/50 rounded-lg p-2.5">
-            <div class="text-slate-500 text-[10px]">Test coverage</div>
-            <div class="font-semibold text-slate-200 mt-0.5">${(d.test_item_coverage_pct||0).toFixed(1)}%</div>
+          <div class="bg-slate-50 rounded-xl p-3">
+            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Test coverage</div>
+            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.test_item_coverage_pct||0).toFixed(1)}%</div>
           </div>
-          <div class="bg-slate-800/50 rounded-lg p-2.5">
-            <div class="text-slate-500 text-[10px]">Train events</div>
-            <div class="font-semibold text-slate-200 mt-0.5">${(d.n_train_events/1e6).toFixed(1)}M</div>
+          <div class="bg-slate-50 rounded-xl p-3">
+            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Train events</div>
+            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.n_train_events/1e6).toFixed(1)}M</div>
           </div>
-          <div class="bg-slate-800/50 rounded-lg p-2.5">
-            <div class="text-slate-500 text-[10px]">Test events</div>
-            <div class="font-semibold text-slate-200 mt-0.5">${(d.n_test_events/1e6).toFixed(1)}M</div>
+          <div class="bg-slate-50 rounded-xl p-3">
+            <div class="text-slate-500 text-[10px] uppercase tracking-wider">Test events</div>
+            <div class="mono font-semibold text-slate-900 mt-1 text-base">${(d.n_test_events/1e6).toFixed(1)}M</div>
           </div>
         </div>
-        ${d.narrative?`<p class="text-[10px] text-slate-500 leading-relaxed">${d.narrative}</p>`:''}
+        ${d.narrative?`<p class="text-[11px] text-slate-600 leading-relaxed border-t border-slate-100 pt-3">${d.narrative}</p>`:''}
       </div>`;
   } catch {
-    el.innerHTML = '<p class="text-xs text-slate-600">Drift report unavailable</p>';
+    el.innerHTML = '<p class="text-xs text-slate-500">Drift report unavailable.</p>';
   }
+}
+
+// ── Metrics view ────────────────────────────────────────────────────────────
+
+function renderMetricsView() {
+  if (!metrics || !metrics.kpis) return;
+
+  // KPIs
+  document.getElementById('kpi-ndcg').textContent  = metrics.kpis.ndcg_20.toFixed(4);
+  document.getElementById('kpi-hr').textContent    = metrics.kpis.hr_20.toFixed(4);
+  document.getElementById('kpi-vspop').textContent = `${metrics.kpis.vs_popularity_x.toFixed(1)}×`;
+
+  // Comparison table
+  const tbody = document.getElementById('comparison-tbody');
+  tbody.innerHTML = '';
+  for (const row of metrics.comparison) {
+    const tr = document.createElement('tr');
+    tr.className = `border-b border-slate-100 ${row.highlight ? 'bg-indigo-50/50' : ''}`;
+    tr.innerHTML = `
+      <td class="py-3.5">
+        <div class="font-semibold ${row.highlight ? 'text-indigo-700' : 'text-slate-900'}">${row.model}</div>
+      </td>
+      <td class="py-3.5 text-right mono font-semibold ${row.highlight ? 'text-indigo-700' : 'text-slate-900'}">${row.ndcg_20!=null?row.ndcg_20.toFixed(4):'—'}</td>
+      <td class="py-3.5 text-right mono ${row.highlight ? 'text-indigo-700 font-semibold' : 'text-slate-700'}">${row.hr_20!=null?row.hr_20.toFixed(4):'—'}</td>
+      <td class="py-3.5 pl-4 text-xs text-slate-500">${row.note}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  // Cohort table
+  const ctb = document.getElementById('cohort-tbody');
+  ctb.innerHTML = '';
+  for (const row of metrics.cohorts) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-slate-100';
+    const winner = row.winner === 'gru4rec' ? '🏆 Model' : 'Popularity';
+    tr.innerHTML = `
+      <td class="py-3.5 font-medium text-slate-900">${row.cohort}</td>
+      <td class="py-3.5 text-right mono text-slate-700">${row.users.toLocaleString()}</td>
+      <td class="py-3.5 text-right mono text-slate-500">${row.share_pct.toFixed(1)}%</td>
+      <td class="py-3.5 text-right mono text-slate-700">${row.gru4rec_r10.toFixed(4)}</td>
+      <td class="py-3.5 text-right mono text-slate-700">${row.popularity_r10.toFixed(4)}</td>
+      <td class="py-3.5 text-center text-xs">
+        <span class="px-2 py-1 rounded-md ${row.winner==='gru4rec'?'bg-emerald-50 text-emerald-700':'bg-slate-100 text-slate-700'}">${winner}</span>
+      </td>`;
+    ctb.appendChild(tr);
+  }
+  if (metrics.cohort_note) document.getElementById('cohort-note').textContent = metrics.cohort_note;
+
+  // Hyperparams
+  const hp = document.getElementById('hparam-list');
+  hp.innerHTML = '';
+  for (const [k, v] of Object.entries(metrics.hyperparameters || {})) {
+    hp.innerHTML += `<dt class="text-slate-500">${k.replace(/_/g,' ')}</dt><dd class="mono text-slate-900 font-medium text-right">${v}</dd>`;
+  }
+
+  // Model meta
+  const mm = document.getElementById('model-meta-list');
+  mm.innerHTML = '';
+  const m = metrics.model || {};
+  const metaPairs = [
+    ['Dataset', m.dataset],
+    ['Items',  m.items?.toLocaleString()],
+    ['Users',  m.users?.toLocaleString()],
+    ['Train sessions', m.train_sessions?.toLocaleString()],
+    ['Val sessions',   m.val_sessions?.toLocaleString()],
+    ['Best epoch',     m.best_epoch],
+    ['Wall-clock',     m.training_time],
+    ['Hardware',       m.hardware],
+  ];
+  for (const [k, v] of metaPairs) {
+    if (v == null) continue;
+    mm.innerHTML += `<dt class="text-slate-500">${k}</dt><dd class="mono text-slate-900 font-medium text-right">${v}</dd>`;
+  }
+
+  // Chart
+  setTimeout(buildChart, 50);
+}
+
+function buildChart() {
+  if (!metrics.training_history || !window.Chart) return;
+  const ctx = document.getElementById('train-chart');
+  if (!ctx) return;
+  if (chart) chart.destroy();
+
+  const epochs = metrics.training_history.map(r => r.epoch);
+  const ndcg   = metrics.training_history.map(r => r.ndcg_20);
+  const loss   = metrics.training_history.map(r => r.train_loss);
+  const bestEp = metrics.model.best_epoch;
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: epochs,
+      datasets: [
+        {
+          label: 'Val NDCG@20',
+          data: ndcg,
+          borderColor: '#4f46e5',
+          backgroundColor: 'rgba(79,70,229,0.1)',
+          borderWidth: 2.5,
+          fill: true,
+          tension: 0.3,
+          yAxisID: 'y',
+          pointRadius: ctx => ctx.dataIndex + 1 === bestEp ? 6 : 0,
+          pointBackgroundColor: '#4f46e5',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        },
+        {
+          label: 'Train loss',
+          data: loss,
+          borderColor: '#fb7185',
+          borderWidth: 2,
+          borderDash: [4,4],
+          fill: false,
+          tension: 0.3,
+          yAxisID: 'y1',
+          pointRadius: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          padding: 10,
+          titleFont: { weight: '600' },
+          callbacks: {
+            title: items => `Epoch ${items[0].label}${(+items[0].label)===bestEp ? '  ★ best' : ''}`,
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Epoch', color: '#64748b', font:{size:11} },
+          grid:  { color: '#f1f5f9' },
+          ticks: { color: '#64748b', font:{size:10, family: 'JetBrains Mono'} },
+        },
+        y: {
+          position: 'left',
+          title: { display: true, text: 'Val NDCG@20', color: '#4f46e5', font:{size:11, weight:'600'} },
+          grid:  { color: '#f1f5f9' },
+          ticks: { color: '#4f46e5', font:{size:10, family: 'JetBrains Mono'} },
+          min: 0.23,
+          max: 0.27,
+        },
+        y1: {
+          position: 'right',
+          title: { display: true, text: 'Train loss', color: '#fb7185', font:{size:11, weight:'600'} },
+          grid:  { display: false },
+          ticks: { color: '#fb7185', font:{size:10, family: 'JetBrains Mono'} },
+          min: 6.85,
+          max: 7.7,
+        },
+      },
+    },
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);
