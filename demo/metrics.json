@@ -56,72 +56,63 @@
       "ndcg_20": 0.2676,
       "hr_20": 0.4815,
       "highlight": true,
-      "note": "This demo · session-based"
+      "type": "my_best",
+      "note": "This demo",
+      "methodology": "Single-layer GRU encoder · cosine-sim head · temp 0.07 · trained on 1M REES46 users · A100 GPU"
     },
     {
       "model": "T4Rec XLNet+RTD",
       "ndcg_20": 0.2546,
       "hr_20": 0.4413,
       "highlight": false,
-      "note": "Published paper baseline"
+      "type": "published",
+      "note": "Published paper target",
+      "methodology": "Transformer-based · replaced-token detection · Coveo SIGIR 2022. The benchmark this project beats."
     },
     {
       "model": "GRU4Rec V9 (500k)",
       "ndcg_20": 0.2606,
       "hr_20": 0.4490,
       "highlight": false,
-      "note": "Half-data run · proves scaling"
+      "type": "my_model",
+      "note": "Earlier scale run",
+      "methodology": "Same architecture as best model, trained on 500k users. Confirms +2.7% NDCG gain from scaling to 1M."
     },
     {
       "model": "Popularity baseline",
       "ndcg_20": 0.0353,
       "hr_20": 0.0806,
       "highlight": false,
-      "note": "Trivial baseline"
+      "type": "trivial",
+      "note": "Trivial baseline",
+      "methodology": "Always recommends globally most-clicked items. No personalization, no session signal. Easy floor to beat."
     },
     {
-      "model": "SASRec V10 (5 attempts)",
+      "model": "SASRec V10",
       "ndcg_20": 0.0044,
       "hr_20": null,
       "highlight": false,
-      "note": "Documented negative result"
+      "type": "negative",
+      "note": "My negative result (5 attempts)",
+      "methodology": "Full self-attention encoder. All 5 tuning attempts failed on short-session data — attention memorized train sequences rather than generalizing. Documents architectural tradeoffs."
     }
   ],
-  "cohorts": [
-    {
-      "cohort": "Cold (3–10 events)",
-      "users": 183992,
-      "share_pct": 53.5,
-      "gru4rec_r10": 0.0728,
-      "popularity_r10": 0.0938,
-      "winner": "popularity"
-    },
-    {
-      "cohort": "Medium (11–50)",
-      "users": 126875,
-      "share_pct": 36.9,
-      "gru4rec_r10": 0.0393,
-      "popularity_r10": 0.0512,
-      "winner": "popularity"
-    },
-    {
-      "cohort": "Warm (51+)",
-      "users": 32956,
-      "share_pct": 9.6,
-      "gru4rec_r10": 0.0208,
-      "popularity_r10": 0.0252,
-      "winner": "popularity"
-    }
+  "at_k": [
+    { "k": 10, "ndcg": 0.2420, "hr": 0.3803 },
+    { "k": 20, "ndcg": 0.2676, "hr": 0.4815 }
   ],
-  "cohort_note": "User-history retrieval (Recall@10) is dominated by popularity at all cohorts — this motivated the pivot to session-based next-item prediction (the GRU4Rec V9 numbers above), where the model exceeds the T4Rec paper baseline.",
+  "scaling": [
+    { "scale": "500k users", "ndcg": 0.2606, "hr": 0.4490 },
+    { "scale": "1M users",   "ndcg": 0.2676, "hr": 0.4815 }
+  ],
   "hyperparameters": {
     "embed_dim": 128,
     "gru_hidden": 256,
     "n_layers": 1,
     "dropout": 0.3,
     "batch_size": 256,
-    "learning_rate": 3e-4,
-    "weight_decay": 1e-5,
+    "learning_rate": "3e-4",
+    "weight_decay": "1e-5",
     "temperature": 0.07,
     "label_smoothing": 0.1,
     "scheduler": "cosine",
