@@ -1,8 +1,10 @@
 # RecoSys
 
 An end-to-end ML portfolio project — session-based recommendation engine on the REES46
-eCommerce clickstream dataset (Oct 2019 – Feb 2020, ~280 M events). Covers the full
+eCommerce clickstream dataset (Oct 2019 – Jan 2020, ~280 M events). Covers the full
 MLOps stack: BigQuery → Spark → GRU4Rec → Vertex AI → Cloud Run → MLflow → drift monitoring.
+
+**[Live Demo →](https://recosys.vercel.app/)**
 
 ---
 
@@ -12,38 +14,69 @@ MLOps stack: BigQuery → Spark → GRU4Rec → Vertex AI → Cloud Run → MLfl
 |---|---|---|---|
 | NDCG@20 | **0.2676** | ≥ 0.22 ✓ | 0.0353 |
 | HR@20 | **0.4815** | ≥ 0.44 ✓ | 0.0806 |
-| vs. T4Rec XLNet (best published) | +5.1% NDCG@20 | — | — |
+| NDCG@10 | **0.2420** | — | 0.0296 |
+| HR@10 | **0.3803** | — | 0.0579 |
+| vs. T4Rec XLNet+RTD (best published) | **+5.1% NDCG@20** | — | — |
+| vs. Popularity baseline | **+7.6× NDCG@20** | — | — |
 
-Model: GRU4Rec V9 with event-type features, trained on 1M-user REES46 sample on Vertex AI (A100 GPU, 10h 46m).
+Model: GRU4Rec V9 with event-type features, trained on 1M-user REES46 sample on Vertex AI (A100 40GB, 10h 46m).
 
-**Live demo (PowerShell):**
-```powershell
-# Health
-Invoke-RestMethod "$SERVICE_URL/health" | ConvertTo-Json
+Scaling from 500k → 1M users produced a consistent **+2.7% NDCG@20** gain, confirming data-scale benefits.
+SASRec was attempted 5 times — all failed on short-session data (best NDCG@20 = 0.0044). Documented as a negative result.
 
-# Recommendations
-$body = '{"session":[{"item_id":"4209538","event_type":"view"},{"item_id":"3622698","event_type":"cart"}],"top_k":20}'
-Invoke-RestMethod -Method Post "$SERVICE_URL/recommend" -ContentType "application/json" -Body $body | ConvertTo-Json
-```
+---
+
+## Live Demo
+
+**[https://recosys.vercel.app/](https://recosys.vercel.app/)**
+
+A full e-commerce front-end backed by the live GRU4Rec V9 model on Cloud Run.
+
+### Shop tab
+- Browse a 2,004-product catalog with category filtering and search
+- Click any product → product detail page opens, a `view` event is silently logged to your session
+- **Add to Cart** logs a `cart` event; **Buy** logs a `purchase` event
+- Cart page with per-item or bulk purchase
+- **Session panel** (right sidebar) tracks your activity in real time — use the **Quick / Browsing / Shopper** quick-fill buttons to auto-load demo events and immediately get recommendations without manually clicking through the catalog
+- **Get Recommendations** → POSTs your session to `/api/recommend` → ranked product cards powered by GRU4Rec V9 + FAISS ANN search over 209,092 items
+
+### Model Performance tab
+- **KPI cards** — NDCG@20, HR@20, vs-T4Rec lift, catalog size
+- **Training progression chart** — Val NDCG@20 + Train loss over 29 epochs; best checkpoint (epoch 24) marked
+- **Model comparison table + bar chart** — GRU4Rec V9 vs T4Rec XLNet+RTD vs Popularity baseline vs SASRec, with type badges distinguishing my models from published baselines and negative results
+- **Distribution drift monitor** — live from `/api/drift`; Jensen-Shannon divergence between Jan 2020 (train) and Mar 2020 (test) distributions, with plain-English explanations, donut charts for Bestseller Stability and Model Coverage
+- **Precision at K chart** — NDCG@10, HR@10, NDCG@20, HR@20
+- **Data scaling impact chart** — 500k vs 1M side-by-side
+- **Architecture + training run cards** — full hyperparameter table, Vertex AI job metadata
+
+### API endpoints (Vercel → Cloud Run proxy)
+
+| Route | Method | Description |
+|---|---|---|
+| `/api/recommend` | POST | Session-based recommendations. Body: `{"session":[{"item_id":"...","event_type":"view"}],"top_k":20}` |
+| `/api/health` | GET | Model health + items indexed in FAISS |
+| `/api/drift` | GET | Live distribution drift report (JSD, overlap, coverage) |
+
+Cloud Run service: `https://recosys-recommender-o34zzoh3da-uc.a.run.app`
 
 ---
 
 ## Project status
 
-| Day | Description | Status |
+| Phase | Description | Status |
 |---|---|---|
 | 1 | Data ingestion — raw CSVs → GCS → BigQuery | ✅ Complete |
 | 2 | Exploratory data analysis (BigQuery + Spark) | ✅ Complete |
 | 3 | Spark preprocessing pipeline (Dataproc) | ✅ Complete |
 | 4 | Sampling, temporal splits, interaction tables | ✅ Complete |
-| 1–4 | Two-Tower V1–V6 + GRU4Rec V7 + SASRec V8 (all below pop baseline) | ✅ Complete |
+| 4 | Two-Tower V1–V6 + GRU4Rec V7 + SASRec V8 (all below pop baseline) | ✅ Complete (negative results documented) |
 | 4 | GRU4Rec V9 session-based — 500k — NDCG@20=0.2606 | ✅ Complete |
 | 5 | 1M-user sample creation (890,736 users, 222,864 items) | ✅ Complete |
 | 6–7 | Vertex AI training on 1M sample — NDCG@20=0.2676 | ✅ Complete |
-| 8–9 | Cloud Run serving (FastAPI + FAISS) | 🔲 In progress |
-| 10–11 | MLflow experiment tracking | 🔲 In progress |
-| 12–13 | Distribution drift monitoring (COVID-period shift) | 🔲 In progress |
-| 14 | End-to-end demo | 🔲 In progress |
+| 8–9 | Cloud Run serving (FastAPI + FAISS) | ✅ Complete |
+| 10–11 | MLflow experiment tracking | ✅ Complete |
+| 12–13 | Distribution drift monitoring (COVID-period shift) | ✅ Complete |
+| 14 | End-to-end live demo (Vercel) | ✅ Complete |
 
 ---
 
@@ -54,7 +87,10 @@ Invoke-RestMethod -Method Post "$SERVICE_URL/recommend" -ContentType "applicatio
 | GCP project | `recosys-489001` |
 | BigQuery dataset | `recosys-489001.recosys` |
 | GCS bucket | `gs://recosys-data-bucket` |
+| Cloud Run service | `recosys-recommender` · `us-central1` |
+| Vertex AI job | `3348631089810767872` · A100 40GB |
 | Dataproc cluster | `eda-reco` — `us-central1`, `n4-standard-2` × 3 nodes |
+| Demo hosting | Vercel · `manojarulmurugan/RecoSys` fork |
 | Service account | `~/secrets/recosys-service-account.json` |
 
 ---
@@ -67,10 +103,59 @@ Invoke-RestMethod -Method Post "$SERVICE_URL/recommend" -ContentType "applicatio
 |---|---|
 | Raw rows loaded | 288,779,227 |
 | Months in scope | Oct 2019 – Jan 2020 (train) + Feb 2020 (test) |
-| Months held out | Mar – Apr 2020 (reserved for MLOps evaluation) |
+| Months held out | Mar – Apr 2020 (reserved for drift evaluation) |
 | Event types | `view` 94.1 %, `cart` 4.2 %, `purchase` 1.6 % |
 | Feedback type | Implicit only (no explicit ratings) |
 | Schema | `event_time, event_type, product_id, category_id, category_code, brand, price, user_id, user_session` |
+
+---
+
+## Model — GRU4Rec V9
+
+**Architecture:** Single-layer GRU encoder → cosine-similarity scoring head → full softmax loss (temperature = 0.07, label smoothing = 0.1).
+
+**Key design choices:**
+- Session-based framing: each `user_session` is an independent sequence. Avoids collapsing multi-session users into one long history, which matches T4Rec paper §4.1 evaluation conventions.
+- Event-type embedding concatenated with item embedding at input — view/cart/purchase carry different intent signals.
+- Cosine similarity head with temperature scaling: gradients are ~14× stronger than raw dot-product, critical for sparse implicit feedback.
+- Trained with full softmax over all 222,864 items per step — memory-intensive but avoids sampled-softmax bias.
+
+**Hyperparameters:**
+
+| Parameter | Value |
+|---|---|
+| `embed_dim` | 128 |
+| `gru_hidden` | 256 |
+| `n_layers` | 1 |
+| `dropout` | 0.3 |
+| `batch_size` | 256 |
+| `learning_rate` | 3e-4 |
+| `temperature` | 0.07 |
+| `label_smoothing` | 0.1 |
+| `scheduler` | cosine (lr_min=1e-5) |
+| `max_seq_len` | 20 |
+| `patience` | 5 |
+
+**Training data (1M run):**
+
+| Metric | Value |
+|---|---|
+| Users | 890,736 |
+| Items (incl PAD) | 222,864 |
+| Train sessions | 2,884,945 |
+| Val sessions | 151,177 |
+| Best epoch | 24 / 29 |
+| FAISS index items | 209,092 |
+
+---
+
+## Negative result — SASRec V10
+
+SASRec was attempted 5 times on the same dataset with systematic hyperparameter and loss-function variation. All attempts failed to beat the popularity baseline (NDCG@20 = 0.034). Best result: NDCG@20 = 0.0044.
+
+**Root cause:** Full self-attention memorises exact training sequence → item co-occurrences. On short sessions (max_len = 20) it has too much capacity and collapses to negative embedding collapse — positive items get high scores, all others are pushed uniformly negative with no transfer to the validation set.
+
+**Literature backing:** Ludewig & Jannach (RecSys 2019), Hidasi & Czapp (RecSys 2023) — GRU4Rec outperforms SASRec on short-session eCommerce tasks. SASRec wins on long user-history benchmarks (ML-1M, Amazon reviews).
 
 ---
 
@@ -78,22 +163,56 @@ Invoke-RestMethod -Method Post "$SERVICE_URL/recommend" -ContentType "applicatio
 
 ```
 RecoSys/
-├── notebooks/
-│   ├── 01_setup_and_integration.ipynb   # GCS upload, raw data verification
-│   ├── 02_sampling_and_splits.ipynb     # events_clean validation (8/8 checks)
-│   ├── 03_EDA_BigQuery.ipynb            # Full BigQuery EDA
-│   ├── 04_EDA_DataProc.ipynb            # Spark EDA on Dataproc
-│   └── 05_cleaned_sample_BigQuery_validation.ipynb
+├── demo/                            # Vercel-hosted frontend
+│   ├── index.html                   # Full e-commerce UI (Shop + Model Performance tabs)
+│   ├── catalog.json                 # 2,004-item product catalog (from BigQuery)
+│   ├── metrics.json                 # Pre-baked model metrics for the dashboard
+│   ├── vercel.json                  # SPA rewrite rule
+│   └── api/
+│       ├── recommend.js             # POST /api/recommend → Cloud Run proxy
+│       ├── health.js                # GET /api/health → Cloud Run proxy
+│       └── drift.js                 # GET /api/drift → Cloud Run proxy
+├── src/
+│   ├── data/
+│   │   └── feature_builder.py
+│   ├── sequence/
+│   │   ├── models/gru4rec.py        # GRU4Rec model definition
+│   │   ├── data/session_dataset.py  # SessionTrainDataset, SessionEvalDataset
+│   │   └── evaluation/evaluate_sequence.py
+│   ├── serving/
+│   │   └── app.py                   # FastAPI app (Cloud Run)
+│   └── two_tower/
+│       └── ...
 ├── scripts/
-│   ├── preprocessing_pipeline.py        # PySpark cleaning pipeline (Dataproc)
-│   ├── create_samples.py                # User-based samples from events_clean
-│   ├── create_splits.py                 # Temporal train/test splits
-│   └── create_interactions.py           # Confidence-weighted interaction matrices
+│   ├── preprocessing_pipeline.py    # PySpark cleaning (Dataproc)
+│   ├── create_samples.py
+│   ├── create_splits.py
+│   ├── create_interactions.py
+│   ├── build_catalog.py             # BigQuery → demo/catalog.json
+│   ├── sequence/
+│   │   ├── build_session_sequences.py
+│   │   └── train_gru4rec_session.py
+│   ├── monitoring/
+│   │   ├── compute_drift.py         # JSD, overlap, coverage → drift_report.json
+│   │   └── plot_drift.py
+│   └── serving/
+│       └── log_experiments_mlflow.py
+├── notebooks/
+│   ├── 01_setup_and_integration.ipynb
+│   ├── 02_sampling_and_splits.ipynb
+│   ├── 03_EDA_BigQuery.ipynb
+│   ├── 04_EDA_DataProc.ipynb
+│   └── 05_cleaned_sample_BigQuery_validation.ipynb
 ├── reports/
-│   ├── 01_eda_report_v1.md              # BigQuery EDA findings
-│   ├── 02_eda_report_v2.md              # BigQuery + Spark EDA (reconciled)
-│   ├── 03_dataproc_preprocessing_run.md # Cluster config, job output, pipeline results
-│   └── 04_sampling_splits_interactions.md  # Sampling, splits, interactions
+│   ├── 07_session_model_results.md  # GRU4Rec V9 500k results + SASRec failure analysis
+│   ├── 08_vertex_ai_1m_training.md  # 1M Vertex AI training log (epoch-by-epoch)
+│   ├── drift_report.json            # Latest drift monitor output
+│   └── figures/
+│       ├── 500k_training_curves.png
+│       └── item_popularity_drift.png
+├── artifacts/
+│   └── diagnostics/
+│       └── cold_warm_summary.json
 ├── requirements.txt
 └── README.md
 ```
@@ -118,23 +237,11 @@ Followed by **3-core filtering** (iterative): retain only users and items with �
 
 **Output:** `recosys.events_clean` — **279,937,243 rows**, 7,565,157 users, 284,523 items.
 
-BigQuery validation (8/8 checks passed):
-- Total rows: 279,937,243 ✅
-- Unique users: 7,565,157 ✅
-- Unique items: 284,523 ✅
-- Price < 1.0: 0 ✅
-- NULL `user_session`: 0 ✅
-- NULL `category_code`: 0 ✅
-- NULL `brand`: 0 ✅
-- Bot users (avg > 300 events/day): 0 ✅
-
 ---
 
 ## Phase 4 — Sampling, splits, and interaction tables
 
 ### User-based samples
-
-`scripts/create_samples.py` — draws N random users from `events_clean` and keeps **all** their events.
 
 | Table | Users | Events | Items |
 |---|---|---|---|
@@ -142,8 +249,6 @@ BigQuery validation (8/8 checks passed):
 | `recosys.events_sample_500k` | 500,000 | 18,506,282 | 231,031 |
 
 ### Temporal train/test splits
-
-`scripts/create_splits.py` — splits each dataset at the Jan/Feb 2020 boundary.
 
 | Table | Rows | Users |
 |---|---|---|
@@ -154,119 +259,25 @@ BigQuery validation (8/8 checks passed):
 | `recosys.train_full` | 227,460,074 | 6,736,214 |
 | `recosys.test_full` | 52,477,169 | 3,132,215 |
 
-Train/test user overlap is ~73.5 % across all three sizes — the majority of February users have prior training history.
-
-### Interaction tables
-
-`scripts/create_interactions.py` — collapses events into one row per `(user_id, product_id)` with confidence weighting: `purchase × 4 + cart × 2 + view × 1`.
-
-| Table | Source | Pairs |
-|---|---|---|
-| `recosys.interactions_train_50k` | `train_50k` | ~1.4 M |
-| `recosys.interactions_train_500k` | `train_500k` | ~13.2 M |
-| `recosys.interactions_train_full` | `train_full` | ~190 M |
-
-All matrices are >99.99 % sparse — consistent with implicit feedback datasets.
-
----
-
-## Phase 5 — Two-Tower Model (50k experiments)
-
-**Model:** Neural retrieval with user tower + item tower + FAISS
-**Location:** `src/two_tower/`, `scripts/two_tower/`
-
-| Experiment | Config | Best Recall@10 |
-|---|---|---|
-| Baseline (v2) | batch=1024, temp=0.05, no weighting | 0.0097 |
-| Confidence weighted (v3) | batch=1024, temp=0.05, weighted | 0.0098 |
-
-**Key findings:**
-- Confidence weighting: neutral on 50k — difference of 0.0001
-- 50k ceiling confirmed at ~0.010 regardless of config
-- FAISS index must be scoped to trained items only
-- Ground truth: cart + purchase events (not purchases only)
-- Bottleneck is data scale — moving to 500k GPU training next
-
----
-
-## Repository layout — Two-Tower
-
-```
-src/
-├── data/
-│   ├── __init__.py
-│   └── feature_builder.py       # shared: vocab + feature encoding
-└── two_tower/
-    ├── __init__.py
-    ├── data/
-    │   └── dataset.py           # TwoTowerDataset, build_full_item_tensors
-    ├── models/
-    │   └── two_tower.py         # UserTower, ItemTower, TwoTowerModel
-    ├── training/
-    │   └── train.py             # in_batch_loss, train_epoch, train
-    └── evaluation/
-        └── evaluate.py          # build_faiss_index, evaluate
-
-scripts/two_tower/
-├── build_item_features.py       # BigQuery: item feature table
-├── build_user_features.py       # BigQuery: user feature table (50k)
-├── build_user_features_500k.py  # BigQuery: user feature table (500k)
-├── build_features_local.py      # encode + validate artifacts (50k)
-├── build_features_local_500k.py # encode + validate artifacts (500k)
-├── train_two_tower.py           # training entry point (50k)
-├── evaluate_two_tower.py        # checkpoint sweep evaluation
-├── sanity_check_model.py        # forward-pass + loss sanity check
-└── diagnose_evaluation.py       # per-user retrieval diagnostics
-```
-
 ---
 
 ## GCS bucket layout
 
 ```
 gs://recosys-data-bucket/
-├── raw/                            # Original CSVs (52.69 GiB, 7 files)
-├── processed/
-│   └── events_clean/               # Parquet output from Spark pipeline
+├── raw/                                    # Original CSVs (52.69 GiB, 7 files)
+├── processed/events_clean/                 # Parquet output from Spark pipeline
 ├── samples/
-│   ├── events_sample_50k/          # 50k-user sample (raw events)
-│   ├── events_sample_500k/         # 500k-user sample (raw events)
-│   ├── users_sample_50k/
-│   │   ├── train/                  # train_50k
-│   │   ├── test/                   # test_50k
-│   │   └── interactions/           # interactions_train_50k
-│   └── users_sample_500k/
-│       ├── train/                  # train_500k
-│       ├── test/                   # test_500k
-│       └── interactions/           # interactions_train_500k
-├── splits/
-│   ├── train_full/                 # train_full
-│   └── test_full/                  # test_full
-└── features/
-    └── interactions_train_full/    # interactions_train_full (~190 M pairs)
+│   ├── events_sample_50k/
+│   └── events_sample_500k/
+├── data/1M/                                # 1M-user session sequences
+└── models/
+    ├── gru4rec_session_v9/                 # 500k checkpoint
+    └── gru4rec_session_v9_1M/
+        ├── best_checkpoint.pt              # Epoch 24 (NDCG@20=0.2676)
+        ├── training_log.json
+        └── hparams.json
 ```
-
-All GCS exports are sharded Parquet files written by BigQuery `EXPORT DATA`. Point downstream readers at the folder, not individual shards. All `event_time`, `first_interaction`, and `last_interaction` columns are explicitly cast to `TIMESTAMP` in every export to prevent BigQuery writing them as `STRING`.
-
----
-
-## Running the scripts
-
-```bash
-# Set credentials (or rely on the hardcoded fallback path)
-export GOOGLE_APPLICATION_CREDENTIALS=~/secrets/recosys-service-account.json
-
-# Create user-based samples from events_clean
-python scripts/create_samples.py
-
-# Create temporal train/test splits for all three sizes
-python scripts/create_splits.py
-
-# Build confidence-weighted interaction matrices
-python scripts/create_interactions.py
-```
-
-Each script prints per-step timing and a validation summary. Re-running is safe — all tables use `CREATE OR REPLACE TABLE` and all exports use `overwrite=true`.
 
 ---
 
@@ -276,6 +287,10 @@ Each script prints per-step timing and a validation summary. Re-running is safe 
 google-cloud-bigquery>=3.0.0
 google-cloud-storage>=3.0.0
 pandas>=1.0.0
+torch>=2.0.0
+faiss-cpu>=1.7.4
+fastapi>=0.100.0
+uvicorn>=0.23.0
 db-dtypes>=1.0.0
 polars>=0.20.0
 matplotlib>=3.0.0
