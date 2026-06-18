@@ -49,8 +49,14 @@ def _hf_download(repo_id: str, filename: str, local_path: Path) -> None:
     local_path.parent.mkdir(parents=True, exist_ok=True)
     from huggingface_hub import hf_hub_download  # type: ignore
     print(f"  Downloading {filename} from HF Hub ({repo_id}) ...")
-    tmp = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset")
-    Path(tmp).rename(local_path)
+    # local_dir writes a real file (no symlinks) — avoids EXDEV when HF cache
+    # and /tmp are on different container mounts.
+    hf_hub_download(
+        repo_id   = repo_id,
+        filename  = filename,
+        repo_type = "dataset",
+        local_dir = str(local_path.parent),
+    )
     mb = local_path.stat().st_size / 1024 / 1024
     print(f"  Downloaded {filename} ({mb:.1f} MB)")
 
