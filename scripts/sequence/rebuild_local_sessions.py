@@ -81,39 +81,58 @@ def _find_csv(events_dir: Path, month: str) -> Path | None:
 
 
 def _load_month(path: Path, user2idx: dict, item2idx: dict) -> pd.DataFrame:
-    """Read one CSV file, filter to in-vocab users, map IDs → indices."""
-    t0 = _step(f"Reading {path.name}")
-    df = pd.read_csv(path, usecols=_RAW_COLS, low_memory=False)
-    _done(t0, label=f"{len(df):,} rows")
+    """Read one CSV file in chunks, filter to in-vocab users, map IDs → indices.
 
-    t0 = _step(f"Filtering to in-vocab users ({path.name})")
-    # Coerce product_id to int (REES46 has them as int)
-    df["product_id"] = pd.to_numeric(df["product_id"], errors="coerce")
-    df["user_id"]    = pd.to_numeric(df["user_id"],    errors="coerce")
-    df = df.dropna(subset=["product_id", "user_id", "user_session"])
-    df["product_id"] = df["product_id"].astype(np.int64)
-    df["user_id"]    = df["user_id"].astype(np.int64)
+    Chunked reading keeps peak RAM at ~200k raw rows at a time (~200 MB),
+    making files like 2019-Nov.csv.gz (2.7 GB compressed, ~15 GB expanded)
+    safe to process on any machine including Colab.
+    """
+    CHUNK = 200_000
+    vocab_user_ids = set(user2idx.keys())
 
-    # Keep only users in the 1M vocab
-    df = df[df["user_id"].isin(user2idx)].copy()
-    _done(t0, label=f"{len(df):,} in-vocab rows")
+    t0 = _step(f"Reading {path.name} in chunks of {CHUNK:,}")
+    kept_chunks: list[pd.DataFrame] = []
+    total_rows = 0
 
-    t0 = _step(f"Mapping IDs and event types ({path.name})")
-    df["user_idx"]   = df["user_id"].map(user2idx).astype(np.int64)
-    df["item_idx"]   = df["product_id"].map(item2idx)
-    df["event_idx"]  = df["event_type"].str.lower().map(EVENT_TYPE_MAP)
-    df["event_time"] = pd.to_datetime(df["event_time"], utc=True)
+    reader = pd.read_csv(
+        path,
+        usecols    = _RAW_COLS,
+        chunksize  = CHUNK,
+        low_memory = False,
+    )
+    for chunk in reader:
+        total_rows += len(chunk)
+        chunk["product_id"] = pd.to_numeric(chunk["product_id"], errors="coerce")
+        chunk["user_id"]    = pd.to_numeric(chunk["user_id"],    errors="coerce")
+        chunk = chunk.dropna(subset=["product_id", "user_id", "user_session"])
+        chunk["product_id"] = chunk["product_id"].astype(np.int64)
+        chunk["user_id"]    = chunk["user_id"].astype(np.int64)
 
-    n_pre = len(df)
-    df = df.dropna(subset=["item_idx", "event_idx"])
-    if len(df) < n_pre:
-        print(f"     dropped {n_pre - len(df):,} OOV items or unknown event types")
+        # Filter to in-vocab users immediately — keeps memory small
+        chunk = chunk[chunk["user_id"].isin(vocab_user_ids)]
+        if len(chunk) == 0:
+            continue
 
-    df["item_idx"]  = df["item_idx"].astype(np.int64)
-    df["event_idx"] = df["event_idx"].astype(np.int64)
-    _done(t0, label=f"{len(df):,} mapped rows")
+        chunk["user_idx"]   = chunk["user_id"].map(user2idx).astype(np.int64)
+        chunk["item_idx"]   = chunk["product_id"].map(item2idx)
+        chunk["event_idx"]  = chunk["event_type"].str.lower().map(EVENT_TYPE_MAP)
+        chunk["event_time"] = pd.to_datetime(chunk["event_time"], utc=True)
+        chunk = chunk.dropna(subset=["item_idx", "event_idx"])
+        chunk["item_idx"]  = chunk["item_idx"].astype(np.int64)
+        chunk["event_idx"] = chunk["event_idx"].astype(np.int64)
+        kept_chunks.append(
+            chunk[["event_time", "user_idx", "item_idx", "event_idx", "user_session"]]
+        )
 
-    return df[["event_time", "user_idx", "item_idx", "event_idx", "user_session"]]
+    if not kept_chunks:
+        print(f"     WARNING: no in-vocab rows found in {path.name}")
+        return pd.DataFrame(
+            columns=["event_time", "user_idx", "item_idx", "event_idx", "user_session"]
+        )
+
+    df = pd.concat(kept_chunks, ignore_index=True)
+    _done(t0, label=f"{total_rows:,} raw rows → {len(df):,} in-vocab rows kept")
+    return df
 
 
 def _remove_consecutive_repeats(
