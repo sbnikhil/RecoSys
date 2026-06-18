@@ -40,9 +40,18 @@ import tempfile
 import time
 from pathlib import Path
 
+# Disable OpenMP/BLAS multi-threading before any native library is imported —
+# faiss + torch both use AVX2 and their parallel thread pools collide during
+# load_state_dict on macOS when multi-threaded.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+# faiss must be imported before torch to avoid AVX2 SIMD register corruption on macOS
 import faiss
 import numpy as np
 import torch
+
+torch.set_num_threads(1)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -210,7 +219,7 @@ def _evaluate_index_quality(
             event_t = torch.tensor([s["prefix_events"] for s in batch], dtype=torch.long)
 
             user_embs = model.encode_sequence(item_t, event_t)
-            user_np   = user_embs.cpu().numpy().astype(np.float32)
+            user_np   = user_embs.cpu().detach().clone().numpy().astype(np.float32)
             faiss.normalize_L2(user_np)
 
             _, faiss_indices = idx.search(user_np, k)
@@ -310,7 +319,7 @@ def main():
     print(f"  n_items={n_items:,}, embed_dim={embed_d}")
 
     with torch.no_grad():
-        all_embs = model.get_item_embeddings().cpu().numpy().astype(np.float32)
+        all_embs = model.get_item_embeddings().cpu().detach().clone().numpy().astype(np.float32)
 
     keep_mask                    = np.ones(n_items, dtype=bool)
     keep_mask[0]                 = False

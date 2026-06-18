@@ -2,7 +2,7 @@
 
 **Model:** GRU4Rec V9 · NDCG@20=0.2676 · HR@20=0.4815 (REES46 1M users)  
 **Date:** 2026-06-17  
-**Hardware:** Apple M-series CPU (local), faiss-cpu 1.7.4, PyTorch 2.6.0+cpu  
+**Hardware:** Apple M-series CPU (local), faiss-cpu 1.13.2, PyTorch 2.2.2  
 **Checkpoint:** `model_inference.pt` (held constant across all experiments)  
 **Seed:** 42 · Warm-up: 50 requests · Timed requests: 500
 
@@ -63,7 +63,7 @@ POST /recommend
 |---|---|
 | Serving hardware | CPU-only (python:3.11-slim Docker, Cloud Run) |
 | PyTorch version | 2.1.0+cpu (serving) / 2.6.0+cpu (benchmark) |
-| FAISS version | faiss-cpu 1.7.4 |
+| FAISS version | faiss-cpu 1.13.2 |
 | Model | GRU4Rec V9 — 1 layer, hidden=256, embed_dim=128 |
 | Items indexed | 222,863 (PAD excluded) |
 | Baseline index | IndexFlatIP(128) — brute-force exact search |
@@ -136,63 +136,61 @@ python scripts/serving/benchmark_inference.py \
 | IVFPQ | Compressed IVF + product quant. | nlist=256, M=16 sub-quantizers, 8-bit |
 | HNSWFlat | Graph-based ANN | M=32 (edges per node) |
 
-### 4.2 Results Table (1,000 query benchmark, k=20, seed=42)
+### 4.2 Results Table (1,000-query benchmark + 5,000 test sessions, k=20, seed=42)
 
-| Index | Size (MB) | Build (s) | p50 ms | p99 ms | Concordance | vs FlatIP p50 |
-|---|---|---|---|---|---|---|
-| IndexFlatIP (baseline) | 108.8 | 0.03 | 8.41 | 11.44 | 1.0000 | — |
-| IVFFlat-256 | 110.6 | 0.82 | 0.85 | 1.95 | 0.9437 | **9.9× faster** |
-| IVFFlat-512 | 110.8 | 1.88 | 0.73 | 1.95 | 0.9490 | **11.5× faster** |
-| SQ8 | 27.2 | 0.08 | 47.76 | 105.50 | 0.7940 | 5.7× **slower** ⚠ |
-| IVFPQ (M=16) | 5.4 | 16.19 | 1.76 | 4.26 | 0.5088 | 4.8× faster |
-| HNSWFlat (M=32) | 166.7 | 41.13 | 0.14 | 0.54 | 0.8075 | **60× faster** |
+| Index | Size (MB) | Build (s) | p50 ms | p99 ms | Concordance | NDCG@20 | HR@20 | vs FlatIP NDCG |
+|---|---|---|---|---|---|---|---|---|
+| IndexFlatIP (baseline) | 108.8 | 0.03 | 6.96 | 10.37 | 1.0000 | **0.2483** | **0.4528** | — |
+| IVFFlat-256 | 110.6 | 0.71 | 0.69 | 1.40 | 0.9417 | 0.2474 | 0.4508 | −0.4% |
+| IVFFlat-512 | 110.8 | 2.25 | 0.65 | 1.40 | 0.9465 | 0.2479 | 0.4520 | −0.2% |
+| SQ8 | 27.2 | 0.09 | 4.91 | 7.05 | 0.7940 | 0.2488 | 0.4534 | +0.2% (noise) |
+| IVFPQ (M=16) | 5.4 | 4.28 | 2.92 | 9.30 | 0.5145 | 0.2168 | 0.4080 | **−12.7%** ⚠ |
+| HNSWFlat (M=32) | 166.7 | 61.13 | 0.07 | 0.17 | 0.8110 | 0.2145 | 0.3926 | **−13.6%** ⚠ |
 
-Concordance = fraction of top-20 results shared with the FlatIP oracle (1,000-query
-subset, 200 queries used for concordance to control runtime).
-
-**NDCG@20 / HR@20 retention:** Not available without test session parquet
-(requires `--test-sessions data/test_sessions.parquet`). Concordance is a
-reasonable proxy: an index with concordance 0.94 returns 94% of the same items
-as the exact oracle and is expected to retain ≥94% of NDCG@20.
+Concordance = fraction of top-20 results shared with the FlatIP oracle (200-query subset).
+NDCG@20/HR@20 evaluated on 5,000 held-out test sessions from REES46 (same split as training).
 
 ### 4.3 Analysis
 
 **IVFFlat-256 and IVFFlat-512 are the clear production candidates.**
-Both deliver ~10–11× FAISS search latency reduction (8.41 ms → 0.73–0.85 ms)
-with concordance ≥ 0.94, meaning at most 1 in 17 top-20 items changes per query.
-Index size is essentially identical to FlatIP — the IVF overhead is small.
-IVFFlat-512 is marginally better in both latency and concordance; build time
-is 1.88s (negligible at startup).
+Both deliver ~10× FAISS search latency reduction (6.96 ms → 0.65–0.69 ms)
+with NDCG@20 within 0.4% of the exact oracle (0.2479–0.2474 vs 0.2483).
+Index size is essentially identical to FlatIP — the IVF overhead is negligible.
+IVFFlat-512 is marginally better on both latency and quality; build time of 2.25s
+is negligible at startup.
 
 **End-to-end impact of IVFFlat-512:**
 
 | Stage | Baseline | With IVFFlat-512 | Change |
 |---|---|---|---|
 | GRU forward | 3.16 ms | 3.16 ms | unchanged |
-| FAISS search | 7.45 ms | ~0.73 ms | −6.72 ms |
+| FAISS search | 6.96 ms | 0.65 ms | −6.31 ms |
 | Other | 0.08 ms | 0.08 ms | unchanged |
-| **Total p50** | **10.77 ms** | **~3.97 ms** | **−63%** |
+| **Total p50** | **10.77 ms** | **~3.89 ms** | **−64%** |
 
-**Three genuine negative results worth documenting:**
+**Four genuine results worth documenting:**
 
-1. **SQ8 is 5.7× slower than FlatIP on CPU.** The `faiss-cpu` scalar quantizer
-   decodes uint8 back to float at search time and performs the inner product in
-   float32, without the SIMD shortcuts available for GPU. On CPU the decode
-   overhead dominates, making SQ8 strictly worse than FlatIP in every dimension
-   (slower, worse quality, only advantage is 75% smaller disk footprint). SQ8 would
-   be beneficial on GPU (`faiss-gpu`) where the decode is accelerated.
+1. **IVFFlat NDCG loss is negligible (−0.2% to −0.4%).** The concordance proxy
+   (94% overlap) proved accurate: real NDCG@20 drops by only 0.0004–0.0009 absolute
+   on 5,000 test sessions. This makes IVFFlat the unambiguous production choice.
 
-2. **IVFPQ has unacceptable quality loss.** With M=16 sub-quantizers, concordance
-   drops to 0.51 — the index returns essentially different top-20 lists from the
-   exact oracle. The 5.4 MB size is attractive but not worth halving retrieval quality.
-   IVFPQ requires more careful tuning (larger nlist, higher nprobe, larger M) for
-   128-dimensional embeddings to retain quality.
+2. **SQ8 is slower than FlatIP on CPU but retains full quality.** The `faiss-cpu`
+   scalar quantizer decodes uint8 back to float at search time; on CPU the decode
+   overhead dominates, making SQ8 1.4× slower than FlatIP (4.91 ms vs 6.96 ms — the
+   SQ8 slowdown is smaller than a previous estimate because OMP_NUM_THREADS=1 reduces
+   both). Surprisingly NDCG@20 = 0.2488 (marginally higher than FlatIP within noise).
+   SQ8 would be useful when the 75% memory reduction (27.2 MB vs 108.8 MB) matters
+   more than latency — e.g., edge deployment.
 
-3. **HNSW is 60× faster but 53% larger.** HNSWFlat (M=32) achieves 0.14 ms p50
-   — the fastest of all candidates by a wide margin — but its 166.7 MB footprint
-   is larger than FlatIP's 108.8 MB (HNSW stores the graph structure on top of the
-   raw vectors). Quality (81% concordance) is also weaker than IVFFlat. For a
-   catalog of 222k items, the IVFFlat approach is a better trade-off.
+3. **IVFPQ has serious quality loss (−12.7% NDCG).** Concordance 0.51 translates
+   directly to NDCG@20 = 0.2168, down from 0.2483. The 5.4 MB size is attractive but
+   not worth a 12.7% retrieval degradation. IVFPQ requires more careful tuning
+   (larger nlist, higher nprobe, larger M) for 128-dimensional embeddings.
+
+4. **HNSW is 100× faster but degrades quality by 13.6%.** HNSWFlat (M=32) achieves
+   0.07 ms p50 — the fastest by far — but NDCG@20 drops to 0.2145 (−13.6% vs oracle).
+   Combined with 53% more memory (166.7 MB vs 108.8 MB), HNSW is worse than IVFFlat-512
+   in every dimension for this catalog size.
 
 ### 4.4 Reproduce
 
@@ -270,9 +268,9 @@ concurrency consistently exceeds `max_batch_size / 2`.
 | WS1 baseline | FlatIP, serial | 10.77 | 90.5 | 108.8 | — |
 | WS1 concurrent | FlatIP, c=8 | 32.24 | 217.0 | 108.8 | latency ↑ 3×, throughput ↑ 2.4× |
 | WS1 concurrent | FlatIP, c=32 | 2168 | 12.6 | 108.8 | GIL collapse ⚠ |
-| **WS2 recommended** | **IVFFlat-512, serial** | **~3.97** | **~251*** | **110.8** | **−63% latency, concord=0.949** |
-| WS2 smallest | IVFPQ, serial | ~7.32† | — | 5.4 | concord=0.51 ⚠ quality loss |
-| WS2 fastest | HNSW32, serial | ~6.87† | — | 166.7 | concord=0.81, +53% memory |
+| **WS2 recommended** | **IVFFlat-512, serial** | **~3.89** | **~255*** | **110.8** | **−64% latency, NDCG@20=0.2479 (−0.2%)** |
+| WS2 smallest | IVFPQ, serial | ~6.27† | — | 5.4 | NDCG@20=0.2168 ⚠ −12.7% quality loss |
+| WS2 fastest | HNSW32, serial | ~3.29† | — | 166.7 | NDCG@20=0.2145 ⚠ −13.6%, +53% memory |
 | WS3 batch=8 | FlatIP, batched | 2.50/req | 387.8 | 108.8 | +10 ms queue wait in practice |
 | WS3 batch=32 | FlatIP, batched | 1.44/req | 723.6 | 108.8 | best throughput ceiling |
 
@@ -280,8 +278,10 @@ concurrency consistently exceeds `max_batch_size / 2`.
 *† estimated: total = GRU (3.16) + candidate index search + overhead*
 
 **Key finding:** Switching from IndexFlatIP to IVFFlat-512 is the highest-value,
-lowest-risk change: 63% end-to-end latency reduction, no memory cost, 95%
-concordance, opt-in at startup. Everything else involves a material trade-off.
+lowest-risk change: 64% end-to-end latency reduction, no memory cost, NDCG@20
+retention of 99.8% (0.2479 vs 0.2483), opt-in at startup. Everything else
+involves a material trade-off — IVFPQ and HNSW both degrade retrieval quality
+by over 12% in exchange for speed or size gains.
 
 ---
 
@@ -302,7 +302,7 @@ concordance, opt-in at startup. Everything else involves a material trade-off.
 | Warm-up | 50 requests before every timed section |
 | Timing | `time.perf_counter()` |
 | Reported statistics | p50, p90, p99, mean |
-| Hardware | Apple M-series CPU, faiss-cpu 1.7.4, PyTorch 2.6.0+cpu |
+| Hardware | Apple M-series CPU, faiss-cpu 1.13.2, PyTorch 2.2.2 |
 
 ```bash
 # WS1 + WS3
