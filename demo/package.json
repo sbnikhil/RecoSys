@@ -2,7 +2,5 @@
   "name": "recosys-demo",
   "version": "1.0.0",
   "private": true,
-  "dependencies": {
-    "google-auth-library": "^9.0.0"
-  }
+  "dependencies": {}
 }

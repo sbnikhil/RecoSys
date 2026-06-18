@@ -1,0 +1,83 @@
+{
+  "run_info": {
+    "n_items_indexed": 222863,
+    "embed_dim": 128,
+    "n_bench_queries": 1000,
+    "n_test_sessions": 0,
+    "seed": 42
+  },
+  "index_results": [
+    {
+      "index_name": "FlatIP",
+      "build_time_s": 0.026,
+      "size_mb": 108.8,
+      "concordance": 1.0,
+      "latency": {
+        "p50_ms": 8.413,
+        "p90_ms": 9.302,
+        "p99_ms": 11.438,
+        "mean_ms": 8.57
+      }
+    },
+    {
+      "index_name": "IVFFlat-256",
+      "build_time_s": 0.822,
+      "size_mb": 110.6,
+      "concordance": 0.9437,
+      "latency": {
+        "p50_ms": 0.854,
+        "p90_ms": 1.398,
+        "p99_ms": 1.948,
+        "mean_ms": 0.912
+      }
+    },
+    {
+      "index_name": "IVFFlat-512",
+      "build_time_s": 1.877,
+      "size_mb": 110.8,
+      "concordance": 0.949,
+      "latency": {
+        "p50_ms": 0.726,
+        "p90_ms": 1.141,
+        "p99_ms": 1.953,
+        "mean_ms": 0.795
+      }
+    },
+    {
+      "index_name": "SQ8",
+      "build_time_s": 0.078,
+      "size_mb": 27.2,
+      "concordance": 0.794,
+      "latency": {
+        "p50_ms": 47.758,
+        "p90_ms": 54.183,
+        "p99_ms": 105.495,
+        "mean_ms": 49.625
+      }
+    },
+    {
+      "index_name": "IVFPQ",
+      "build_time_s": 16.19,
+      "size_mb": 5.4,
+      "concordance": 0.5088,
+      "latency": {
+        "p50_ms": 1.76,
+        "p90_ms": 3.038,
+        "p99_ms": 4.258,
+        "mean_ms": 1.939
+      }
+    },
+    {
+      "index_name": "HNSW32",
+      "build_time_s": 41.129,
+      "size_mb": 166.7,
+      "concordance": 0.8075,
+      "latency": {
+        "p50_ms": 0.135,
+        "p90_ms": 0.234,
+        "p99_ms": 0.543,
+        "mean_ms": 0.158
+      }
+    }
+  ]
+}

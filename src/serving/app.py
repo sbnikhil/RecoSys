@@ -5,12 +5,16 @@ build happens in a background thread (~20-60s). Endpoints return HTTP 503
 until loading finishes, then switch to normal operation.
 
 Environment variables:
-    GCS_CHECKPOINT_DIR  GCS directory with best_checkpoint.pt + hparams.json
-    GCS_VOCABS_PATH     GCS path to vocabs.pkl
+    GCS_CHECKPOINT_DIR       GCS directory with best_checkpoint.pt + hparams.json
+    GCS_VOCABS_PATH          GCS path to vocabs.pkl
+    ENABLE_DYNAMIC_BATCHING  Set to "true" to batch concurrent /recommend requests.
+                             Default: off (existing single-item path unchanged).
+                             See src/serving/batching.py for details.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -44,6 +48,7 @@ _MAX_TOP_K   = 50
 
 _artifacts:     ServingArtifacts | None = None
 _loading_error: str | None              = None
+_batch_queue:   object | None           = None   # DynamicBatchQueue when enabled
 
 # Drift report is baked into the Docker image at /app/drift_report.json;
 # fall back to the local repo path when running outside Docker.
@@ -73,7 +78,36 @@ async def lifespan(app: FastAPI):
     # regardless of whether loading is complete yet.
     t = threading.Thread(target=_load_in_background, daemon=True)
     t.start()
+
+    # Wait for artifacts, then optionally start the dynamic batch queue.
+    # The queue is a coroutine (asyncio.Task) and must be created after
+    # the event loop is running — hence it lives here, not in the thread.
+    if os.environ.get("ENABLE_DYNAMIC_BATCHING", "").lower() == "true":
+        asyncio.get_event_loop().create_task(_start_batch_queue())
+
     yield
+
+
+async def _start_batch_queue() -> None:
+    """Wait for artifacts to load, then start the dynamic batch queue task."""
+    global _batch_queue
+    while _artifacts is None and _loading_error is None:
+        await asyncio.sleep(1)
+    if _artifacts is None:
+        return
+    from src.serving.batching import DynamicBatchQueue
+    _batch_queue = DynamicBatchQueue(
+        model          = _artifacts.model,
+        index          = _artifacts.index,
+        item_idx_array = _artifacts.item_idx_array,
+        vocabs         = _artifacts.vocabs,
+        max_batch_size = int(os.environ.get("BATCH_MAX_SIZE",  "16")),
+        max_wait_ms    = float(os.environ.get("BATCH_MAX_WAIT_MS", "10")),
+    )
+    print(f"Dynamic batching enabled  "
+          f"(max_batch={_batch_queue._max_batch}, "
+          f"max_wait={_batch_queue._max_wait_s * 1000:.0f}ms)")
+    asyncio.get_event_loop().create_task(_batch_queue.run())
 
 
 app = FastAPI(
@@ -153,7 +187,7 @@ def drift_report():
 
 @app.post("/recommend", response_model=RecommendResponse)
 @limiter.limit("10/minute")
-def recommend(request: Request, req: RecommendRequest):
+async def recommend(request: Request, req: RecommendRequest):
     if _artifacts is None:
         raise HTTPException(503, "Model not loaded")
 
@@ -183,6 +217,16 @@ def recommend(request: Request, req: RecommendRequest):
         item_seq [start + i] = iidx
         event_seq[start + i] = etype
 
+    # ── Dynamic batching path (opt-in via ENABLE_DYNAMIC_BATCHING=true) ──
+    if _batch_queue is not None:
+        rec_item_ids = await _batch_queue.enqueue(item_seq, event_seq, req.top_k)
+        return RecommendResponse(
+            recommendations = rec_item_ids,
+            session_length  = len(req.session),
+            known_items     = len(known),
+        )
+
+    # ── Default: single-item path (unchanged behaviour) ───────────────────
     item_t  = torch.tensor([item_seq],  dtype=torch.long)
     event_t = torch.tensor([event_seq], dtype=torch.long)
 

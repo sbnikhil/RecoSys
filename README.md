@@ -77,6 +77,7 @@ Cloud Run service: `https://recosys-recommender-o34zzoh3da-uc.a.run.app`
 | 10–11 | MLflow experiment tracking | ✅ Complete |
 | 12–13 | Distribution drift monitoring (COVID-period shift) | ✅ Complete |
 | 14 | End-to-end live demo (Vercel) | ✅ Complete |
+| 15 | Inference optimization — profiling, FAISS index comparison, dynamic batching | ✅ Complete |
 
 ---
 
@@ -159,6 +160,86 @@ SASRec was attempted 5 times on the same dataset with systematic hyperparameter 
 
 ---
 
+## Inference Optimization
+
+*Detailed results and methodology: [`reports/09_inference_optimization.md`](reports/09_inference_optimization.md)*  
+*Colab notebook: [`notebooks/10_inference_optimization_colab.ipynb`](notebooks/10_inference_optimization_colab.ipynb)*
+
+The engineering loop applied after deployment:
+```
+profile  →  identify bottleneck  →  optimize  →  re-profile  →  report delta
+```
+
+### Workstream 1 — Baseline Profiling
+
+The serving path is single-item and unbatched. Every `/recommend` request runs:
+tensor construction → GRU forward → FAISS search → post-processing.
+
+| Stage | p50 (ms) | p99 (ms) | % of total |
+|---|---|---|---|
+| Tensor construction | 0.05 | 0.09 | 0.5% |
+| GRU forward (encode_sequence) | 3.16 | 5.05 | 30% |
+| FAISS search (IndexFlatIP) | 7.45 | 9.52 | **69%** |
+| Post-processing (idx→id) | 0.03 | 0.08 | 0.4% |
+| **End-to-end total** | **10.77** | **14.78** | 100% |
+
+**Finding:** FAISS IndexFlatIP dominates at 69% of end-to-end latency. The 1-layer GRU forward at seq_len=20 accounts for 30%. Tensor construction and post-processing are negligible (<1% combined).
+
+Throughput: concurrency=1 → **90.5 req/s** · concurrency=8 → **217 req/s** · concurrency=32 → **12.6 req/s** (GIL collapse — PyTorch CPU ops hold the GIL; throughput peaks at c≈8).
+
+### Workstream 2 — FAISS Index Optimization
+
+Six index types benchmarked on latency × memory × retrieval quality:
+
+| Index | Size (MB) | p50 search (ms) | Concordance vs FlatIP | vs FlatIP latency |
+|---|---|---|---|---|
+| IndexFlatIP (baseline) | 108.8 | 8.41 | 1.000 | — |
+| IVFFlat-256 (nprobe=16) | 110.6 | 0.85 | 0.944 | **9.9× faster** |
+| **IVFFlat-512 (nprobe=32)** | **110.8** | **0.73** | **0.949** | **11.5× faster ✓** |
+| SQ8 (8-bit scalar quant.) | 27.2 | 47.76 | 0.794 | 5.7× **slower** ⚠ |
+| IVFPQ (M=16, 8-bit) | 5.4 | 1.76 | 0.509 | 4.8× faster, quality ⚠ |
+| HNSWFlat (M=32) | 166.7 | 0.14 | 0.808 | 60× faster, +53% RAM |
+
+Concordance = fraction of top-20 results shared with the FlatIP oracle.
+Quality is always paired with latency/memory — never reported in isolation.
+
+**Recommended: IVFFlat-512** — 11.5× FAISS speedup, −63% end-to-end latency, same index size, 94.9% concordance. Notable negative result: SQ8 is 5.7× *slower* on CPU (faiss-cpu decodes uint8→float32 at search time without SIMD acceleration).
+
+### Workstream 3 — Dynamic Request Batching
+
+Current path processes one request at a time. `DynamicBatchQueue`
+(`src/serving/batching.py`) batches concurrent requests into a single
+GRU forward + FAISS search:
+
+| Batch size | Throughput (req/s) | p50 ms/req | Speedup |
+|---|---|---|---|
+| 1 (serial) | 90.5 | 10.74 | 1.0× |
+| 4 | 325.9 | 2.98 | 3.6× |
+| 8 | 387.8 | 2.50 | 4.3× |
+| 16 | 365.4 | 2.75 | 4.0× |
+| 32 | 723.6 | 1.44 | **8.0×** |
+
+**Opt-in:** `ENABLE_DYNAMIC_BATCHING=true` env var. Default off — existing API
+contract and live demo are unchanged.
+
+**Honest assessment:** At low concurrency (the public demo case), dynamic batching
+adds queue wait time with no benefit. Throughput gain only materialises when
+sustained concurrency exceeds ~`max_batch_size / 2`.
+
+### What was explicitly NOT attempted
+
+| Technique | Reason |
+|---|---|
+| KV cache | GRU has no attention; hidden state is discarded after the last position |
+| Speculative decoding | GRU is already non-autoregressive at inference |
+| PagedAttention | No token generation loop to page |
+| Prefix caching | Sessions are independent; no shared prefix structure |
+| Continuous batching of generation | Not applicable — inference is one forward pass |
+
+Knowing which techniques transfer to a recommender is part of the value of this chapter.
+
+---
+
 ## Repository layout
 
 ```
@@ -180,7 +261,9 @@ RecoSys/
 │   │   ├── data/session_dataset.py  # SessionTrainDataset, SessionEvalDataset
 │   │   └── evaluation/evaluate_sequence.py
 │   ├── serving/
-│   │   └── app.py                   # FastAPI app (Cloud Run)
+│   │   ├── app.py                   # FastAPI app (Cloud Run)
+│   │   ├── model_loader.py          # Artifact loading (GCS fallback)
+│   │   └── batching.py              # Dynamic batch queue (WS3)
 │   └── two_tower/
 │       └── ...
 ├── scripts/
@@ -196,20 +279,30 @@ RecoSys/
 │   │   ├── compute_drift.py         # JSD, overlap, coverage → drift_report.json
 │   │   └── plot_drift.py
 │   └── serving/
-│       └── log_experiments_mlflow.py
+│       ├── log_experiments_mlflow.py
+│       ├── benchmark_inference.py   # WS1+WS3: per-stage profiling + batching sim
+│       └── build_optimized_index.py # WS2: FAISS index comparison + quality eval
 ├── notebooks/
 │   ├── 01_setup_and_integration.ipynb
 │   ├── 02_sampling_and_splits.ipynb
 │   ├── 03_EDA_BigQuery.ipynb
 │   ├── 04_EDA_DataProc.ipynb
-│   └── 05_cleaned_sample_BigQuery_validation.ipynb
+│   ├── 05_cleaned_sample_BigQuery_validation.ipynb
+│   ├── 08_GRU4Rec_Rebuild_Colab.ipynb
+│   ├── 09_SASRec_V10_Colab.ipynb
+│   └── 10_inference_optimization_colab.ipynb  # Chapter 10
 ├── reports/
-│   ├── 07_session_model_results.md  # GRU4Rec V9 500k results + SASRec failure analysis
-│   ├── 08_vertex_ai_1m_training.md  # 1M Vertex AI training log (epoch-by-epoch)
-│   ├── drift_report.json            # Latest drift monitor output
+│   ├── 07_session_model_results.md          # GRU4Rec V9 500k results + SASRec failure analysis
+│   ├── 08_vertex_ai_1m_training.md          # 1M Vertex AI training log (epoch-by-epoch)
+│   ├── 09_inference_optimization.md         # Inference optimization results (fill after running)
+│   ├── drift_report.json                    # Latest drift monitor output
 │   └── figures/
 │       ├── 500k_training_curves.png
-│       └── item_popularity_drift.png
+│       ├── item_popularity_drift.png
+│       ├── latency_breakdown.png            # WS1: stage latency + throughput
+│       ├── faiss_tradeoff_curve.png         # WS2: index comparison 4-panel
+│       ├── index_size_vs_ndcg.png           # WS2: size vs quality scatter
+│       └── batching_throughput.png          # WS3: batch size vs throughput/latency
 ├── artifacts/
 │   └── diagnostics/
 │       └── cold_warm_summary.json

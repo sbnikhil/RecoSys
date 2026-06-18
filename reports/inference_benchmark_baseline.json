@@ -1,0 +1,142 @@
+{
+  "run_info": {
+    "n_items_indexed": 222863,
+    "embed_dim": 128,
+    "gru_hidden": 256,
+    "n_layers": 1,
+    "index_type": "IndexFlatIP",
+    "index_size_mb": 108.8,
+    "n_requests": 500,
+    "n_warmup": 50,
+    "hardware": "cpu",
+    "seed": 42
+  },
+  "stage_latency_ms": {
+    "tensor_ms": {
+      "p50_ms": 0.046,
+      "p90_ms": 0.054,
+      "p99_ms": 0.085,
+      "mean_ms": 0.047,
+      "min_ms": 0.031,
+      "max_ms": 0.107,
+      "n": 500
+    },
+    "gru_ms": {
+      "p50_ms": 3.16,
+      "p90_ms": 3.748,
+      "p99_ms": 5.052,
+      "mean_ms": 3.309,
+      "min_ms": 2.967,
+      "max_ms": 5.818,
+      "n": 500
+    },
+    "faiss_ms": {
+      "p50_ms": 7.451,
+      "p90_ms": 8.185,
+      "p99_ms": 9.52,
+      "mean_ms": 7.644,
+      "min_ms": 7.213,
+      "max_ms": 12.637,
+      "n": 500
+    },
+    "postproc_ms": {
+      "p50_ms": 0.034,
+      "p90_ms": 0.045,
+      "p99_ms": 0.078,
+      "mean_ms": 0.036,
+      "min_ms": 0.025,
+      "max_ms": 0.195,
+      "n": 500
+    },
+    "total_ms": {
+      "p50_ms": 10.767,
+      "p90_ms": 11.787,
+      "p99_ms": 14.78,
+      "mean_ms": 11.036,
+      "min_ms": 10.34,
+      "max_ms": 16.128,
+      "n": 500
+    }
+  },
+  "concurrency_results": [
+    {
+      "concurrency": 1,
+      "throughput_rps": 90.55,
+      "p50_ms": 10.745,
+      "p90_ms": 11.747,
+      "p99_ms": 13.108,
+      "mean_ms": 10.985,
+      "min_ms": 10.316,
+      "max_ms": 15.924,
+      "n": 500
+    },
+    {
+      "concurrency": 8,
+      "throughput_rps": 216.97,
+      "p50_ms": 32.241,
+      "p90_ms": 52.076,
+      "p99_ms": 192.701,
+      "mean_ms": 36.556,
+      "min_ms": 13.996,
+      "max_ms": 201.589,
+      "n": 500
+    },
+    {
+      "concurrency": 32,
+      "throughput_rps": 12.63,
+      "p50_ms": 2168.213,
+      "p90_ms": 4797.135,
+      "p99_ms": 7871.179,
+      "mean_ms": 2519.159,
+      "min_ms": 19.751,
+      "max_ms": 10779.192,
+      "n": 500
+    }
+  ],
+  "batching_simulation": [
+    {
+      "max_batch_size": 4,
+      "throughput_rps": 325.88,
+      "p50_ms": 2.979,
+      "p90_ms": 3.534,
+      "p99_ms": 4.452,
+      "mean_ms": 3.066,
+      "min_ms": 2.561,
+      "max_ms": 4.462,
+      "n": 500
+    },
+    {
+      "max_batch_size": 8,
+      "throughput_rps": 387.8,
+      "p50_ms": 2.504,
+      "p90_ms": 2.981,
+      "p99_ms": 3.34,
+      "mean_ms": 2.577,
+      "min_ms": 2.258,
+      "max_ms": 3.34,
+      "n": 500
+    },
+    {
+      "max_batch_size": 16,
+      "throughput_rps": 365.36,
+      "p50_ms": 2.753,
+      "p90_ms": 3.037,
+      "p99_ms": 3.184,
+      "mean_ms": 2.736,
+      "min_ms": 2.195,
+      "max_ms": 3.184,
+      "n": 500
+    },
+    {
+      "max_batch_size": 32,
+      "throughput_rps": 723.64,
+      "p50_ms": 1.435,
+      "p90_ms": 1.502,
+      "p99_ms": 1.997,
+      "mean_ms": 1.381,
+      "min_ms": 0.777,
+      "max_ms": 1.997,
+      "n": 500
+    }
+  ]
+}
