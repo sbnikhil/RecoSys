@@ -1,32 +1,28 @@
 """Iterative weekly fine-tuning pipeline for GRU4Rec V9.
 
-Splits Feb 2020 raw events into 4 weekly increments, then for each week:
-  1. Computes item-popularity drift (JSD) vs. the Jan 2020 baseline
-  2. If drift > threshold OR week 1: fine-tunes from the current checkpoint
-     for FINETUNE_EPOCHS epochs at a lower LR
-  3. Evaluates the fine-tuned model on val_sessions.parquet
-  4. Promotes the new checkpoint if NDCG@20 improved ≥ IMPROVE_THRESHOLD
-  5. Logs metrics to DagsHub MLflow (optional)
+Covers Feb 2020 (weeks 1-4) and optionally Mar 2020 (weeks 5-8).
 
-Design choice — fine-tune, not retrain:
-  Full retraining is ~10 h on A100 / ~35 h on T4.  Fine-tuning 5 epochs
-  from the existing checkpoint takes ~2 h on T4 per weekly increment (4 runs =
-  ~8 h total, easily split across Colab sessions via --weeks flag).
-  The checkpoint dir is on Google Drive, so it persists between sessions.
+Per week:
+  1. Compute item-popularity drift (JSD) vs. the appropriate monthly baseline
+     (Jan → weeks 1-4;  Feb → weeks 5-8)
+  2. Fine-tune from the current checkpoint for FINETUNE_EPOCHS at a lower LR.
+     Optionally mixes in a replay sample from historical training data to
+     mitigate catastrophic forgetting.
+  3. Evaluate on the NEXT week's sessions (rolling eval) — this mirrors
+     production: the model is judged on whether it predicts future behaviour,
+     not whether it still remembers the January distribution.
+  4. Promote the checkpoint only if rolling-eval NDCG@20 improved ≥ threshold.
 
-Colab usage (4 separate sessions, one per week):
-    # Mount Drive first in Colab, then:
-    !python scripts/retrain/run_weekly_pipeline.py \\
-        --feb-csv      /content/drive/MyDrive/rees46/2020-Feb.csv.gz \\
-        --jan-csv      /content/drive/MyDrive/rees46/2020-Jan.csv.gz \\
-        --base-ckpt    model/model_inference.pt \\
-        --vocabs-path  model/vocabs.pkl \\
-        --val-sessions artifacts/1M/sequences/val_sessions.parquet \\
-        --ckpt-dir     /content/drive/MyDrive/recosys_weekly \\
-        --weeks        1     # Change to 2, 3, 4 in subsequent sessions
+Rolling eval:
+  week 1 (Feb 01–08)  →  eval on week 2 (Feb 08–15)
+  week 2 (Feb 08–15)  →  eval on week 3 (Feb 15–22)
+  ...
+  week 7 (Mar 15–22)  →  eval on week 8 (Mar 22–29)
+  week 8 (Mar 22–29)  →  eval on test_sessions.parquet  (stable fallback)
 
-    # Log to DagsHub (optional):
-        --dagshub-username <u> --dagshub-token <t>
+Experience replay:
+  Pass --train-sessions /path/to/train_sessions.parquet and --replay-ratio 0.3
+  to mix 30% historical sessions into each week's fine-tuning data.
 """
 
 from __future__ import annotations
@@ -35,11 +31,11 @@ import argparse
 import json
 import math
 import pickle
+import shutil
 import sys
 import time
 from pathlib import Path
 
-# ensure repo root is on sys.path regardless of where the script is invoked from
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
@@ -53,23 +49,34 @@ from src.sequence.evaluation.evaluate_sequence import evaluate_sessions
 from src.sequence.models.gru4rec import GRU4RecModel
 from src.sequence.training.train_sequence import get_param_groups, train_epoch_session
 
-# ── Pipeline constants ────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 
-FINETUNE_EPOCHS   = 5       # epochs per weekly increment
-FINETUNE_LR       = 1e-4   # 3× lower than original 3e-4
+FINETUNE_EPOCHS   = 5
+FINETUNE_LR       = 1e-4
 FINETUNE_LR_MIN   = 1e-5
-BATCH_SIZE        = 128     # lower than training (T4 has less VRAM during fine-tune)
-DRIFT_THRESHOLD   = 0.10   # JSD above this triggers fine-tuning (paper threshold)
-IMPROVE_THRESHOLD = 0.0005  # promote only if NDCG@20 improves by ≥ 0.05%
+BATCH_SIZE        = 128
+DRIFT_THRESHOLD   = 0.10
+IMPROVE_THRESHOLD = 0.0005
 MAX_SEQ_LEN       = 20
 MIN_SEQ_LEN       = 2
+REPLAY_RATIO      = 0.30   # fraction of fine-tune batch drawn from history
 
-# Week date ranges (inclusive start, exclusive end)
-_WEEK_RANGES = {
+# Week ranges: [inclusive start, exclusive end)
+_WEEK_RANGES: dict[int, tuple[str, str]] = {
     1: ("2020-02-01", "2020-02-08"),
     2: ("2020-02-08", "2020-02-15"),
     3: ("2020-02-15", "2020-02-22"),
     4: ("2020-02-22", "2020-03-01"),
+    5: ("2020-03-01", "2020-03-08"),
+    6: ("2020-03-08", "2020-03-15"),
+    7: ("2020-03-15", "2020-03-22"),
+    8: ("2020-03-22", "2020-03-29"),
+}
+
+# Drift baseline: which month's events to compare against for JSD
+_DRIFT_BASELINE: dict[int, str] = {
+    1: "jan", 2: "jan", 3: "jan", 4: "jan",
+    5: "feb", 6: "feb", 7: "feb", 8: "feb",
 }
 
 EVENT_TYPE_MAP = {"view": 1, "cart": 2, "purchase": 3, "remove_from_cart": 0}
@@ -88,7 +95,7 @@ def _done(t0: float, label: str = "") -> None:
 
 
 def _load_raw_csv(path: Path, user2idx: dict, item2idx: dict) -> pd.DataFrame:
-    """Load a raw REES46 CSV and filter to in-vocab users."""
+    """Read a raw REES46 CSV and filter to in-vocab users/items."""
     t0 = _step(f"Loading {path.name}")
     df = pd.read_csv(
         path,
@@ -101,15 +108,22 @@ def _load_raw_csv(path: Path, user2idx: dict, item2idx: dict) -> pd.DataFrame:
     df["product_id"] = df["product_id"].astype(np.int64)
     df["user_id"]    = df["user_id"].astype(np.int64)
     df = df[df["user_id"].isin(user2idx)].copy()
-    df["user_idx"]   = df["user_id"].map(user2idx).astype(np.int64)
-    df["item_idx"]   = df["product_id"].map(item2idx)
-    df["event_idx"]  = df["event_type"].str.lower().map(EVENT_TYPE_MAP)
+    df["user_idx"]  = df["user_id"].map(user2idx).astype(np.int64)
+    df["item_idx"]  = df["product_id"].map(item2idx)
+    df["event_idx"] = df["event_type"].str.lower().map(EVENT_TYPE_MAP)
     df["event_time"] = pd.to_datetime(df["event_time"], utc=True)
     df = df.dropna(subset=["item_idx", "event_idx"])
-    df["item_idx"]   = df["item_idx"].astype(np.int64)
-    df["event_idx"]  = df["event_idx"].astype(np.int64)
+    df["item_idx"]  = df["item_idx"].astype(np.int64)
+    df["event_idx"] = df["event_idx"].astype(np.int64)
     _done(t0, label=f"{len(df):,} in-vocab events")
     return df[["event_time", "user_idx", "item_idx", "event_idx", "user_session"]]
+
+
+def _events_in_range(events: pd.DataFrame, start_str: str, end_str: str) -> pd.DataFrame:
+    start = pd.Timestamp(start_str, tz="UTC")
+    end   = pd.Timestamp(end_str,   tz="UTC")
+    mask  = (events["event_time"] >= start) & (events["event_time"] < end)
+    return events.loc[mask].copy()
 
 
 def _remove_consecutive_repeats(
@@ -123,20 +137,18 @@ def _remove_consecutive_repeats(
 
 
 def _build_sessions(df: pd.DataFrame) -> pd.DataFrame:
-    """Build session parquet DataFrame from event-level DataFrame."""
+    """Build session DataFrame from event-level DataFrame."""
     df = df.sort_values(
         ["user_idx", "user_session", "event_time"], kind="mergesort"
     ).reset_index(drop=True)
-
     grouped = (
         df.groupby(["user_idx", "user_session"], sort=False, as_index=False)
           .agg(item_seq=("item_idx", list), event_seq=("event_idx", list))
     )
     new_items, new_events = [], []
-    for items, events in zip(
-        grouped["item_seq"].to_numpy(), grouped["event_seq"].to_numpy()
-    ):
-        ai, ae = np.asarray(items, np.int64), np.asarray(events, np.int64)
+    for items, evts in zip(grouped["item_seq"].to_numpy(), grouped["event_seq"].to_numpy()):
+        ai = np.asarray(items, np.int64)
+        ae = np.asarray(evts,  np.int64)
         ai, ae = _remove_consecutive_repeats(ai, ae)
         if ai.shape[0] > MAX_SEQ_LEN:
             ai, ae = ai[-MAX_SEQ_LEN:], ae[-MAX_SEQ_LEN:]
@@ -161,22 +173,19 @@ def _compute_jsd(ref_events: pd.DataFrame, new_events: pd.DataFrame, n_items: in
         total = counts.sum()
         return counts / total if total > 0 else counts
 
-    p = _freq(ref_events)
-    q = _freq(new_events)
+    p, q = _freq(ref_events), _freq(new_events)
     m = 0.5 * (p + q)
 
     def _kl(a: np.ndarray, b: np.ndarray) -> float:
         mask = (a > 0) & (b > 0)
         return float(np.sum(a[mask] * np.log(a[mask] / b[mask])))
 
-    jsd = 0.5 * _kl(p, m) + 0.5 * _kl(q, m)
-    return float(np.clip(jsd / math.log(2), 0.0, 1.0))  # normalize to [0, 1]
+    return float(np.clip(0.5 * _kl(p, m) + 0.5 * _kl(q, m), 0.0, math.log(2)) / math.log(2))
 
 
-def _load_checkpoint(ckpt_path: Path, device: torch.device) -> tuple[GRU4RecModel, dict]:
-    """Load a checkpoint and return the model + hparams."""
-    ckpt = torch.load(str(ckpt_path), map_location=device, weights_only=False)
-    hp   = ckpt["hparams"]
+def _load_checkpoint(path: Path, device: torch.device) -> tuple[GRU4RecModel, dict]:
+    ckpt  = torch.load(str(path), map_location=device, weights_only=False)
+    hp    = ckpt["hparams"]
     model = GRU4RecModel(
         n_items       = int(hp["n_items"]),
         n_event_types = 4,
@@ -191,26 +200,25 @@ def _load_checkpoint(ckpt_path: Path, device: torch.device) -> tuple[GRU4RecMode
 
 def _evaluate(
     model: GRU4RecModel,
-    val_df: pd.DataFrame,
-    train_sessions_df: pd.DataFrame,
+    eval_df: pd.DataFrame,
+    train_df: pd.DataFrame,
     n_items: int,
     device: torch.device,
     label: str,
 ) -> dict:
-    """Evaluate model on val_sessions. Returns metrics dict."""
-    eval_ds = SessionEvalDataset(val_df, max_seq_len=MAX_SEQ_LEN)
+    eval_ds = SessionEvalDataset(eval_df, max_seq_len=MAX_SEQ_LEN)
     return evaluate_sessions(
-        model            = model,
-        prefix_item_arr  = eval_ds.prefix_item_arr,
-        prefix_event_arr = eval_ds.prefix_event_arr,
-        target_items     = eval_ds.target_items,
-        train_sessions_df= train_sessions_df,
-        n_items          = n_items,
-        device           = device,
-        batch_size       = 512,
-        n_faiss_candidates = 50,
-        label            = label,
-        normalize        = True,
+        model             = model,
+        prefix_item_arr   = eval_ds.prefix_item_arr,
+        prefix_event_arr  = eval_ds.prefix_event_arr,
+        target_items      = eval_ds.target_items,
+        train_sessions_df = train_df,
+        n_items           = n_items,
+        device            = device,
+        batch_size        = 512,
+        n_faiss_candidates= 50,
+        label             = label,
+        normalize         = True,
     )
 
 
@@ -220,47 +228,65 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Iterative weekly fine-tuning pipeline for GRU4Rec V9"
     )
-    parser.add_argument("--feb-csv",       required=True, help="Path to 2020-Feb.csv[.gz]")
-    parser.add_argument("--jan-csv",       required=True, help="Path to 2020-Jan.csv[.gz] (drift baseline)")
-    parser.add_argument("--base-ckpt",     default="model/model_inference.pt")
-    parser.add_argument("--vocabs-path",   default="model/vocabs.pkl")
-    parser.add_argument("--val-sessions",  required=True, help="Path to val_sessions.parquet")
-    parser.add_argument("--ckpt-dir",      required=True, help="Directory to save weekly checkpoints")
-    parser.add_argument(
-        "--weeks",
-        type=int,
-        nargs="+",
-        default=[1, 2, 3, 4],
-        help="Which weeks to process (default: 1 2 3 4). Run one per Colab session.",
-    )
-    parser.add_argument("--finetune-epochs",    type=int,   default=FINETUNE_EPOCHS)
-    parser.add_argument("--lr",                 type=float, default=FINETUNE_LR)
-    parser.add_argument("--batch-size",         type=int,   default=BATCH_SIZE)
-    parser.add_argument("--drift-threshold",    type=float, default=DRIFT_THRESHOLD)
-    parser.add_argument("--improve-threshold",  type=float, default=IMPROVE_THRESHOLD)
-    parser.add_argument("--dagshub-username",   default=None)
-    parser.add_argument("--dagshub-token",      default=None)
-    parser.add_argument("--mlflow-uri",         default=None)
+    # ── Data ────────────────────────────────────────────────────────────────
+    parser.add_argument("--baseline-csv",   required=True,
+                        help="Jan 2020 CSV (drift baseline for Feb weeks)")
+    parser.add_argument("--feb-csv",        required=True,
+                        help="Feb 2020 CSV (weeks 1-4)")
+    parser.add_argument("--mar-csv",        default=None,
+                        help="Mar 2020 CSV (weeks 5-8, optional)")
+    parser.add_argument("--train-sessions", default=None,
+                        help="train_sessions.parquet for experience replay (optional)")
+    parser.add_argument("--test-sessions",  default=None,
+                        help="test_sessions.parquet — used as fallback eval for week 8")
+    # ── Model ───────────────────────────────────────────────────────────────
+    parser.add_argument("--base-ckpt",    default="model/model_inference.pt")
+    parser.add_argument("--vocabs-path",  default="model/vocabs.pkl")
+    parser.add_argument("--ckpt-dir",     required=True)
+    # ── Pipeline control ─────────────────────────────────────────────────
+    parser.add_argument("--weeks",         type=int, nargs="+", default=[1, 2, 3, 4],
+                        help="Which weeks to run (1-4 = Feb, 5-8 = Mar)")
+    parser.add_argument("--replay-ratio",  type=float, default=REPLAY_RATIO,
+                        help="Fraction of fine-tune data drawn from history (0 to disable)")
+    parser.add_argument("--finetune-epochs",   type=int,   default=FINETUNE_EPOCHS)
+    parser.add_argument("--lr",                type=float, default=FINETUNE_LR)
+    parser.add_argument("--batch-size",        type=int,   default=BATCH_SIZE)
+    parser.add_argument("--drift-threshold",   type=float, default=DRIFT_THRESHOLD)
+    parser.add_argument("--improve-threshold", type=float, default=IMPROVE_THRESHOLD)
+    parser.add_argument("--reset",             action="store_true",
+                        help="Delete existing pipeline_state.json and start fresh")
+    # ── MLflow ──────────────────────────────────────────────────────────────
+    parser.add_argument("--dagshub-username", default=None)
+    parser.add_argument("--dagshub-token",    default=None)
+    parser.add_argument("--mlflow-uri",       default=None)
     args = parser.parse_args()
 
-    ckpt_dir = Path(args.ckpt_dir)
+    ckpt_dir   = Path(args.ckpt_dir)
+    state_path = ckpt_dir / "pipeline_state.json"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.reset and state_path.exists():
+        state_path.unlink()
+        print("  Deleted existing pipeline_state.json — starting fresh")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\n{'=' * 60}")
-    print(f"RecoSys — Weekly Fine-Tuning Pipeline")
+    print("RecoSys — Weekly Fine-Tuning Pipeline")
     print(f"{'=' * 60}")
-    print(f"  Device      : {device}")
-    print(f"  Weeks       : {args.weeks}")
-    print(f"  Epochs/week : {args.finetune_epochs}")
-    print(f"  LR          : {args.lr}")
+    print(f"  Device        : {device}")
+    print(f"  Weeks         : {sorted(args.weeks)}")
+    print(f"  Epochs/week   : {args.finetune_epochs}")
+    print(f"  LR            : {args.lr}")
+    print(f"  Replay ratio  : {args.replay_ratio:.0%}")
+    print(f"  Eval strategy : rolling (week W → eval on week W+1)")
 
-    # ── MLflow setup ─────────────────────────────────────────────────────────
+    # ── MLflow ───────────────────────────────────────────────────────────────
     mlflow_enabled = False
     try:
-        import mlflow
-        import os
+        import mlflow, os
         if args.dagshub_username and args.dagshub_token:
-            tracking_uri = args.mlflow_uri or f"https://dagshub.com/{args.dagshub_username}/RecoSys.mlflow"
+            tracking_uri = args.mlflow_uri or \
+                f"https://dagshub.com/{args.dagshub_username}/RecoSys.mlflow"
             os.environ["MLFLOW_TRACKING_USERNAME"] = args.dagshub_username
             os.environ["MLFLOW_TRACKING_PASSWORD"] = args.dagshub_token
         elif args.mlflow_uri:
@@ -280,91 +306,132 @@ def main() -> None:
         vocabs: dict = pickle.load(f)
     user2idx: dict = vocabs["user2idx"]
     item2idx: dict = vocabs["item2idx"]
-    n_items = len(item2idx) + 1  # +1 for PAD
+    n_items = len(item2idx) + 1
     _done(t0, label=f"{len(user2idx):,} users / {n_items:,} items")
 
-    # ── Load validation sessions ──────────────────────────────────────────────
-    t0 = _step("Loading val sessions")
-    val_df = pd.read_parquet(args.val_sessions)
-    _done(t0, label=f"{len(val_df):,} sessions")
+    # ── Load monthly CSVs ─────────────────────────────────────────────────────
+    jan_events = _load_raw_csv(Path(args.baseline_csv), user2idx, item2idx)
+    feb_events = _load_raw_csv(Path(args.feb_csv),      user2idx, item2idx)
 
-    # ── Load Jan events as drift baseline ─────────────────────────────────────
-    t0 = _step("Loading Jan 2020 events for drift baseline")
-    jan_events = _load_raw_csv(Path(args.jan_csv), user2idx, item2idx)
+    mar_events: pd.DataFrame | None = None
+    if args.mar_csv:
+        mar_events = _load_raw_csv(Path(args.mar_csv), user2idx, item2idx)
 
-    # ── Load all Feb events once (split by week inside loop) ──────────────────
-    t0 = _step("Loading Feb 2020 events")
-    feb_events = _load_raw_csv(Path(args.feb_csv), user2idx, item2idx)
+    # Combined pool for arbitrary date-range queries
+    all_events = pd.concat(
+        [e for e in [feb_events, mar_events] if e is not None],
+        ignore_index=True,
+    )
 
-    # ── Load initial "current best" checkpoint ────────────────────────────────
+    # ── Experience replay pool ────────────────────────────────────────────────
+    hist_df: pd.DataFrame | None = None
+    if args.train_sessions and args.replay_ratio > 0:
+        t0 = _step("Loading historical sessions for replay buffer")
+        hist_df = pd.read_parquet(args.train_sessions)
+        _done(t0, label=f"{len(hist_df):,} historical sessions available")
+
+    # ── Fallback test set for week 8 ─────────────────────────────────────────
+    test_df: pd.DataFrame | None = None
+    if args.test_sessions:
+        t0 = _step("Loading test sessions (week-8 fallback)")
+        test_df = pd.read_parquet(args.test_sessions)
+        _done(t0, label=f"{len(test_df):,} sessions")
+
+    # ── Initial checkpoint ────────────────────────────────────────────────────
     current_ckpt = ckpt_dir / "current_best.pt"
     if not current_ckpt.exists():
-        import shutil
         shutil.copy2(args.base_ckpt, current_ckpt)
-        print(f"  Copied base checkpoint → {current_ckpt}")
+        print(f"\n  Copied base checkpoint → {current_ckpt}")
 
-    # Load baseline NDCG from state file
-    state_path = ckpt_dir / "pipeline_state.json"
+    # ── Pipeline state ────────────────────────────────────────────────────────
     if state_path.exists():
         state = json.loads(state_path.read_text())
+        already_done = {e["week"] for e in state["history"]}
     else:
-        # Evaluate baseline model to set the starting NDCG
-        print("\n  Evaluating baseline model ...")
-        model, hp = _load_checkpoint(current_ckpt, device)
-        base_model_metrics = _evaluate(model, val_df, val_df, n_items, device, "baseline")
+        # Evaluate baseline model on week-1 rolling eval window (Feb 8-15)
+        print("\n  Evaluating baseline model on rolling-eval week 1 (Feb 08–15) ...")
+        eval_events = _events_in_range(all_events, "2020-02-08", "2020-02-15")
+        baseline_eval_df = _build_sessions(eval_events)
+        if len(baseline_eval_df) == 0:
+            # fallback: use test_df or week-1 sessions
+            baseline_eval_df = test_df if test_df is not None else \
+                _build_sessions(_events_in_range(all_events, "2020-02-01", "2020-02-08"))
+
+        model, _ = _load_checkpoint(current_ckpt, device)
+        base_metrics = _evaluate(
+            model, baseline_eval_df, baseline_eval_df, n_items, device, "baseline"
+        )
         state = {
-            "current_ndcg_20": float(base_model_metrics["ndcg_20"]),
-            "history": [],
+            "current_ndcg_20":   float(base_metrics["ndcg_20"]),
+            "eval_strategy":     "rolling",
+            "history":           [],
         }
         state_path.write_text(json.dumps(state, indent=2))
-        print(f"  Baseline NDCG@20: {state['current_ndcg_20']:.4f}")
+        print(f"  Baseline NDCG@20 (rolling eval window): {state['current_ndcg_20']:.4f}")
+        already_done: set[int] = set()
 
     # ── Weekly loop ───────────────────────────────────────────────────────────
     for week in sorted(args.weeks):
         if week not in _WEEK_RANGES:
-            print(f"  WARNING: week {week} not in 1-4, skipping")
+            print(f"\n  WARNING: week {week} not in 1-8, skipping")
+            continue
+
+        if week in already_done:
+            print(f"\n  Week {week} already completed in a previous run — skipping")
+            continue
+
+        if week >= 5 and mar_events is None:
+            print(f"\n  Week {week} requires --mar-csv — skipping")
             continue
 
         start_str, end_str = _WEEK_RANGES[week]
-        start_ts = pd.Timestamp(start_str, tz="UTC")
-        end_ts   = pd.Timestamp(end_str,   tz="UTC")
-
         print(f"\n{'─' * 60}")
         print(f"  WEEK {week}: {start_str} → {end_str}")
         print(f"{'─' * 60}")
 
-        # Filter this week's events
-        week_mask   = (feb_events["event_time"] >= start_ts) & (feb_events["event_time"] < end_ts)
-        week_events = feb_events.loc[week_mask].copy()
+        # ── Events for this week ─────────────────────────────────────────────
+        week_events = _events_in_range(all_events, start_str, end_str)
         print(f"  {len(week_events):,} events in week {week}")
-
         if len(week_events) < 100:
-            print(f"  Too few events for week {week}, skipping")
+            print(f"  Too few events — skipping")
             continue
 
-        # ── 1. Drift score ────────────────────────────────────────────────────
-        jsd = _compute_jsd(jan_events, week_events, n_items)
-        print(f"  Drift (JSD vs Jan 2020): {jsd:.4f} (threshold={args.drift_threshold})")
+        # ── 1. Drift ─────────────────────────────────────────────────────────
+        baseline_key = _DRIFT_BASELINE[week]
+        drift_ref    = jan_events if baseline_key == "jan" else feb_events
+        drift_label  = "Jan 2020" if baseline_key == "jan" else "Feb 2020"
+        jsd = _compute_jsd(drift_ref, week_events, n_items)
+        print(f"  Drift (JSD vs {drift_label}): {jsd:.4f}  (threshold={args.drift_threshold})")
 
-        should_finetune = (jsd >= args.drift_threshold) or (week == 1)
-        if not should_finetune:
-            print(f"  Drift below threshold — skipping fine-tuning for week {week}")
+        if jsd < args.drift_threshold and week != 1:
+            print(f"  Drift below threshold — fine-tuning skipped")
             state["history"].append({
-                "week": week, "jsd": jsd, "action": "skipped", "reason": "below_threshold"
+                "week": week, "jsd": jsd, "action": "no_finetune",
+                "reason": "below_threshold",
             })
             state_path.write_text(json.dumps(state, indent=2))
             continue
 
-        # ── 2. Build session sequences for this week ──────────────────────────
+        # ── 2. Build train sessions (+ replay) ───────────────────────────────
         t0 = _step(f"Building sessions for week {week}")
         week_sessions = _build_sessions(week_events)
         _done(t0, label=f"{len(week_sessions):,} sessions")
 
         if len(week_sessions) < 50:
-            print(f"  Too few sessions for week {week}, skipping fine-tuning")
+            print(f"  Too few sessions — skipping")
             continue
 
-        train_ds = SessionTrainDataset(week_sessions, max_seq_len=MAX_SEQ_LEN)
+        if hist_df is not None and args.replay_ratio > 0:
+            n_replay = int(len(week_sessions) * args.replay_ratio / (1 - args.replay_ratio))
+            n_replay = min(n_replay, len(hist_df))
+            replay = hist_df.sample(n_replay, random_state=42)
+            train_df = pd.concat([week_sessions, replay], ignore_index=True)
+            print(f"  Replay: {n_replay:,} historical sessions added "
+                  f"({args.replay_ratio:.0%} ratio) → {len(train_df):,} total")
+        else:
+            train_df = week_sessions
+
+        train_ds = SessionTrainDataset(train_df, max_seq_len=MAX_SEQ_LEN)
         train_loader = DataLoader(
             train_ds,
             batch_size  = args.batch_size,
@@ -375,36 +442,62 @@ def main() -> None:
         )
         print(f"  Train loader: {len(train_loader):,} batches × {args.batch_size}")
 
-        # ── 3. Fine-tune ───────────────────────────────────────────────────────
+        # ── 3. Fine-tune ──────────────────────────────────────────────────────
         model, hp = _load_checkpoint(current_ckpt, device)
-        optimizer = optim.AdamW(
-            get_param_groups(model, lr=args.lr, weight_decay=1e-5)
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer  = optim.AdamW(get_param_groups(model, lr=args.lr, weight_decay=1e-5))
+        scheduler  = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=args.finetune_epochs, eta_min=FINETUNE_LR_MIN
         )
 
         epoch_losses = []
         for epoch in range(1, args.finetune_epochs + 1):
-            t0 = _step(f"Fine-tuning epoch {epoch}/{args.finetune_epochs}")
+            t0   = _step(f"Fine-tuning epoch {epoch}/{args.finetune_epochs}")
             loss = train_epoch_session(
-                model        = model,
-                dataloader   = train_loader,
-                optimizer    = optimizer,
-                device       = device,
-                temperature  = float(hp.get("temperature", 0.07)),
+                model           = model,
+                dataloader      = train_loader,
+                optimizer       = optimizer,
+                device          = device,
+                temperature     = float(hp.get("temperature",    0.07)),
                 label_smoothing = float(hp.get("label_smoothing", 0.1)),
-                grad_clip    = 1.0,
-                log_every    = 50,
-                step_scheduler = None,
+                grad_clip       = 1.0,
+                log_every       = 50,
+                step_scheduler  = None,
             )
             scheduler.step()
             epoch_losses.append(loss)
             _done(t0, label=f"loss={loss:.4f}  lr={scheduler.get_last_lr()[0]:.2e}")
 
-        # ── 4. Evaluate ────────────────────────────────────────────────────────
-        t0 = _step("Evaluating fine-tuned model")
-        metrics = _evaluate(model, val_df, week_sessions, n_items, device, f"week{week}")
+        # ── 4. Rolling eval — NEXT week's data ───────────────────────────────
+        next_week = week + 1
+        if next_week in _WEEK_RANGES:
+            nw_start, nw_end = _WEEK_RANGES[next_week]
+            print(f"\n  Rolling eval: building sessions for week {next_week} "
+                  f"({nw_start} → {nw_end}) ...")
+            nw_events = _events_in_range(all_events, nw_start, nw_end)
+            rolling_eval_df = _build_sessions(nw_events)
+            eval_label = f"week{next_week}_rolling"
+            eval_source = f"week {next_week} ({nw_start}–{nw_end})"
+        elif test_df is not None:
+            # Last week: fall back to fixed test set
+            rolling_eval_df = test_df
+            eval_label  = "test_fallback"
+            eval_source = "test_sessions.parquet (last-week fallback)"
+            print(f"\n  Rolling eval: no week {next_week} data — using test set")
+        else:
+            print(f"\n  No rollling eval available for week {week} — skipping eval")
+            state["history"].append({
+                "week": week, "jsd": jsd, "action": "trained_no_eval",
+                "epoch_losses": epoch_losses,
+            })
+            state_path.write_text(json.dumps(state, indent=2))
+            continue
+
+        if len(rolling_eval_df) == 0:
+            print(f"  No sessions in rolling eval window — skipping eval")
+            continue
+
+        t0 = _step(f"Evaluating on {eval_source}")
+        metrics = _evaluate(model, rolling_eval_df, week_sessions, n_items, device, eval_label)
         _done(t0)
 
         new_ndcg    = float(metrics["ndcg_20"])
@@ -413,16 +506,16 @@ def main() -> None:
         print(f"\n  NDCG@20: {new_ndcg:.4f}  (prev best: {prev_ndcg:.4f}, Δ={improvement:+.4f})")
         print(f"  HR@20  : {metrics.get('hr_20', 0.0):.4f}")
 
-        # ── 5. Promote if improved ─────────────────────────────────────────────
+        # ── 5. Promote if improved ────────────────────────────────────────────
         week_ckpt = ckpt_dir / f"week{week}_checkpoint.pt"
         torch.save(
             {
-                "hparams":     hp,
-                "model_state": model.state_dict(),
+                "hparams":      hp,
+                "model_state":  model.state_dict(),
                 "epoch_losses": epoch_losses,
-                "val_ndcg_20": new_ndcg,
-                "week":        week,
-                "jsd":         jsd,
+                "val_ndcg_20":  new_ndcg,
+                "week":         week,
+                "jsd":          jsd,
             },
             str(week_ckpt),
         )
@@ -430,53 +523,55 @@ def main() -> None:
 
         action = "skipped"
         if improvement >= args.improve_threshold:
-            import shutil
             shutil.copy2(week_ckpt, current_ckpt)
             state["current_ndcg_20"] = new_ndcg
             action = "promoted"
             print(f"  ✓ Promoted: NDCG@20 improved by {improvement:+.4f}")
         else:
-            print(f"  ✗ Not promoted: improvement ({improvement:+.4f}) < threshold ({args.improve_threshold})")
+            print(f"  ✗ Not promoted: Δ={improvement:+.4f} < threshold {args.improve_threshold}")
 
         history_entry = {
-            "week":          week,
-            "jsd":           jsd,
-            "action":        action,
-            "val_ndcg_20":   new_ndcg,
-            "improvement":   improvement,
-            "epoch_losses":  epoch_losses,
-            "hr_20":         metrics.get("hr_20"),
+            "week":         week,
+            "jsd":          jsd,
+            "action":       action,
+            "eval_on":      eval_source,
+            "val_ndcg_20":  new_ndcg,
+            "improvement":  improvement,
+            "epoch_losses": epoch_losses,
+            "hr_20":        metrics.get("hr_20"),
         }
         state["history"].append(history_entry)
         state_path.write_text(json.dumps(state, indent=2))
 
-        # ── MLflow logging ─────────────────────────────────────────────────────
         if mlflow_enabled:
             with mlflow.start_run(run_name=f"week{week}_finetune"):
-                mlflow.log_param("week", week)
+                mlflow.log_param("week",            week)
                 mlflow.log_param("finetune_epochs", args.finetune_epochs)
-                mlflow.log_param("lr", args.lr)
-                mlflow.log_metric("jsd", jsd)
-                mlflow.log_metric("val_ndcg_20", new_ndcg)
-                mlflow.log_metric("val_hr_20", metrics.get("hr_20", 0.0))
-                mlflow.log_metric("improvement", improvement)
+                mlflow.log_param("lr",              args.lr)
+                mlflow.log_param("replay_ratio",    args.replay_ratio)
+                mlflow.log_metric("jsd",            jsd)
+                mlflow.log_metric("rolling_ndcg_20", new_ndcg)
+                mlflow.log_metric("rolling_hr_20",  metrics.get("hr_20", 0.0))
+                mlflow.log_metric("improvement",    improvement)
                 for ep, loss in enumerate(epoch_losses, 1):
                     mlflow.log_metric("finetune_loss", loss, step=ep)
-                mlflow.set_tag("action", action)
+                mlflow.set_tag("action",    action)
+                mlflow.set_tag("eval_on",   eval_source)
+                mlflow.set_tag("drift_ref", _DRIFT_BASELINE[week])
 
-    # ── Final summary ─────────────────────────────────────────────────────────
+    # ── Summary ───────────────────────────────────────────────────────────────
     print(f"\n{'=' * 60}")
-    print("Pipeline complete. Summary:")
+    print("Pipeline complete. Summary (rolling eval):")
     print(f"{'=' * 60}")
     for entry in state["history"]:
-        w = entry["week"]
-        jsd = entry["jsd"]
-        act = entry["action"]
-        ndcg = entry.get("val_ndcg_20", "—")
-        imp  = entry.get("improvement", "—")
+        w      = entry["week"]
+        jsd    = entry.get("jsd", 0)
+        act    = entry.get("action", "—")
+        ndcg   = entry.get("val_ndcg_20", "—")
+        imp    = entry.get("improvement", "—")
         ndcg_s = f"{ndcg:.4f}" if isinstance(ndcg, float) else str(ndcg)
         imp_s  = f"{imp:+.4f}" if isinstance(imp,  float) else str(imp)
-        print(f"  Week {w}: JSD={jsd:.3f}  action={act:<10}  NDCG@20={ndcg_s}  Δ={imp_s}")
+        print(f"  Week {w}: JSD={jsd:.3f}  action={act:<12}  NDCG@20={ndcg_s}  Δ={imp_s}")
     print(f"\n  Current best NDCG@20 : {state['current_ndcg_20']:.4f}")
     print(f"  Best checkpoint      : {current_ckpt}")
     print(f"  State saved to       : {state_path}")
