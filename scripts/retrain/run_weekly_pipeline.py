@@ -474,7 +474,9 @@ def main() -> None:
         act = entry["action"]
         ndcg = entry.get("val_ndcg_20", "—")
         imp  = entry.get("improvement", "—")
-        print(f"  Week {w}: JSD={jsd:.3f}  action={act:<10}  NDCG@20={ndcg:.4f if isinstance(ndcg, float) else ndcg}  Δ={imp:+.4f if isinstance(imp, float) else imp}")
+        ndcg_s = f"{ndcg:.4f}" if isinstance(ndcg, float) else str(ndcg)
+        imp_s  = f"{imp:+.4f}" if isinstance(imp,  float) else str(imp)
+        print(f"  Week {w}: JSD={jsd:.3f}  action={act:<10}  NDCG@20={ndcg_s}  Δ={imp_s}")
     print(f"\n  Current best NDCG@20 : {state['current_ndcg_20']:.4f}")
     print(f"  Best checkpoint      : {current_ckpt}")
     print(f"  State saved to       : {state_path}")
