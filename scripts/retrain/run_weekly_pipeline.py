@@ -35,8 +35,12 @@ import argparse
 import json
 import math
 import pickle
+import sys
 import time
 from pathlib import Path
+
+# ensure repo root is on sys.path regardless of where the script is invoked from
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import pandas as pd
