@@ -2,7 +2,7 @@
 
 An end-to-end ML portfolio project — session-based recommendation engine on the REES46
 eCommerce clickstream dataset (Oct 2019 – Jan 2020, ~280 M events). Covers the full
-MLOps stack: BigQuery → Spark → GRU4Rec → Vertex AI → Cloud Run → MLflow → drift monitoring.
+MLOps stack: BigQuery → Spark → GRU4Rec → Vertex AI → Hugging Face Spaces → MLflow → drift monitoring + weekly re-training.
 
 **[Live Demo →](https://recosys.vercel.app/)**
 
@@ -30,7 +30,12 @@ SASRec was attempted 5 times — all failed on short-session data (best NDCG@20 
 
 **[https://recosys.vercel.app/](https://recosys.vercel.app/)**
 
-A full e-commerce front-end backed by the live GRU4Rec V9 model on Cloud Run.
+A full e-commerce front-end backed by the live GRU4Rec V9 model served on
+**Hugging Face Spaces** (Docker, FastAPI + FAISS, CPU-only). Model artifacts
+(`model_inference.pt`, `vocabs.pkl`) are stored in the
+[manojarulmurugan/recosys-models](https://huggingface.co/datasets/manojarulmurugan/recosys-models)
+HF Hub dataset repo and downloaded at container startup. The Vercel frontend proxies
+`/api/*` requests to the HF Space backend via the `BACKEND_URL` environment variable.
 
 ### Shop tab
 - Browse a 2,004-product catalog with category filtering and search
@@ -49,15 +54,16 @@ A full e-commerce front-end backed by the live GRU4Rec V9 model on Cloud Run.
 - **Data scaling impact chart** — 500k vs 1M side-by-side
 - **Architecture + training run cards** — full hyperparameter table, Vertex AI job metadata
 
-### API endpoints (Vercel → Cloud Run proxy)
+### API endpoints (Vercel → HF Spaces proxy)
 
 | Route | Method | Description |
 |---|---|---|
 | `/api/recommend` | POST | Session-based recommendations. Body: `{"session":[{"item_id":"...","event_type":"view"}],"top_k":20}` |
 | `/api/health` | GET | Model health + items indexed in FAISS |
-| `/api/drift` | GET | Live distribution drift report (JSD, overlap, coverage) |
+| `/api/drift` | GET | Distribution drift report (JSD, overlap, coverage) |
 
-Cloud Run service: `https://recosys-recommender-o34zzoh3da-uc.a.run.app`
+Serving: **Hugging Face Spaces** (Docker, port 7860, `Dockerfile.spaces`)  
+Artifacts: `manojarulmurugan/recosys-models` on HF Hub (downloaded at startup via `HF_DATASET_REPO` env var)
 
 ---
 
@@ -73,12 +79,12 @@ Cloud Run service: `https://recosys-recommender-o34zzoh3da-uc.a.run.app`
 | 4 | GRU4Rec V9 session-based — 500k — NDCG@20=0.2606 | ✅ Complete |
 | 5 | 1M-user sample creation (890,736 users, 222,864 items) | ✅ Complete |
 | 6–7 | Vertex AI training on 1M sample — NDCG@20=0.2676 | ✅ Complete |
-| 8–9 | Cloud Run serving (FastAPI + FAISS) | ✅ Complete |
-| 10–11 | MLflow experiment tracking | ✅ Complete |
-| 12–13 | Distribution drift monitoring (COVID-period shift) | ✅ Complete |
-| 14 | End-to-end live demo (Vercel) | ✅ Complete |
+| 8–9 | FastAPI + FAISS serving (originally Cloud Run; migrated to HF Spaces) | ✅ Complete |
+| 10–11 | MLflow experiment tracking (DagsHub) | ✅ Complete |
+| 12–13 | Distribution drift monitoring (JSD, COVID-period shift) | ✅ Complete |
+| 14 | End-to-end live demo (Vercel → HF Spaces) | ✅ Complete |
 | 15 | Inference optimization — profiling, FAISS index comparison, dynamic batching | ✅ Complete |
-| 16 | Weekly re-training pipeline — drift detection (JSD), iterative fine-tuning, experience replay | ✅ Complete |
+| 16 | Weekly re-training pipeline — rolling eval, experience replay, COVID stress-test | ✅ Complete |
 
 ---
 
@@ -86,13 +92,14 @@ Cloud Run service: `https://recosys-recommender-o34zzoh3da-uc.a.run.app`
 
 | Resource | Value |
 |---|---|
-| GCP project | `recosys-489001` |
+| GCP project | `recosys-489001` *(training/preprocessing only)* |
 | BigQuery dataset | `recosys-489001.recosys` |
-| GCS bucket | `gs://recosys-data-bucket` |
-| Cloud Run service | `recosys-recommender` · `us-central1` |
 | Vertex AI job | `3348631089810767872` · A100 40GB |
 | Dataproc cluster | `eda-reco` — `us-central1`, `n4-standard-2` × 3 nodes |
+| Model artifacts | HF Hub dataset · `manojarulmurugan/recosys-models` |
+| Serving | Hugging Face Spaces · Docker · FastAPI + FAISS · port 7860 |
 | Demo hosting | Vercel · `manojarulmurugan/RecoSys` fork |
+| MLflow tracking | DagsHub · `manojarulmurugan/RecoSys` |
 | Service account | `~/secrets/recosys-service-account.json` |
 
 ---
@@ -158,6 +165,63 @@ SASRec was attempted 5 times on the same dataset with systematic hyperparameter 
 **Root cause:** Full self-attention memorises exact training sequence → item co-occurrences. On short sessions (max_len = 20) it has too much capacity and collapses to negative embedding collapse — positive items get high scores, all others are pushed uniformly negative with no transfer to the validation set.
 
 **Literature backing:** Ludewig & Jannach (RecSys 2019), Hidasi & Czapp (RecSys 2023) — GRU4Rec outperforms SASRec on short-session eCommerce tasks. SASRec wins on long user-history benchmarks (ML-1M, Amazon reviews).
+
+---
+
+## Serving — Hugging Face Spaces
+
+*Dockerfile: [`Dockerfile.spaces`](Dockerfile.spaces)*  
+*Model loader: [`src/serving/model_loader.py`](src/serving/model_loader.py)*  
+*App: [`src/serving/app.py`](src/serving/app.py)*
+
+The GRU4Rec V9 model is served as a FastAPI application inside a Hugging Face Spaces
+Docker container. The serving path is CPU-only and single-item unbatched.
+
+### Request flow
+
+```
+POST /recommend
+  ↓  Pydantic validation
+  ↓  item2idx vocab lookup
+  ↓  left-pad session to MAX_SEQ_LEN=20
+  ↓  model.encode_sequence(item_t, event_t)   →  (1, 128) GRU output
+  ↓  faiss.normalize_L2(user_np)
+  ↓  index.search(user_np, top_k+10)          ←  dominant cost (IndexFlatIP, 222,863 items)
+  ↓  map FAISS positions → item_ids
+  ↓  return RecommendResponse
+```
+
+### Artifact resolution at startup
+
+```
+1. /app/model/           — baked into Docker image (instant, preferred)
+2. HF_DATASET_REPO       — downloads from manojarulmurugan/recosys-models at startup
+3. GCS                   — legacy fallback (no longer used)
+```
+
+In the HF Spaces deployment, `HF_DATASET_REPO=manojarulmurugan/recosys-models` is set
+as a Space secret. The container downloads `model_inference.pt` (115 MB) and `vocabs.pkl`
+(22 MB) from the HF Hub dataset repo, then builds the FAISS IndexFlatIP over 222,863 items.
+
+### Serving specs
+
+| Component | Value |
+|---|---|
+| Runtime | `python:3.11-slim` Docker, HF Spaces |
+| Port | 7860 (HF Spaces default) |
+| PyTorch | 2.1.0+cpu |
+| FAISS | faiss-cpu 1.7.4 |
+| Index | IndexFlatIP(128) — brute-force, exact |
+| Items indexed | 222,863 (PAD excluded) |
+| Rate limiting | slowapi (prevents runaway demo usage) |
+
+### Dynamic batching (opt-in)
+
+`src/serving/batching.py` implements a `DynamicBatchQueue` (asyncio-native) that
+accumulates concurrent requests into a single GRU forward + FAISS search. Activated by
+`ENABLE_DYNAMIC_BATCHING=true` env var — default off. At current demo traffic (single
+user, low concurrency) the queue wait time would exceed any batching gain, so it remains
+disabled. See Inference Optimization § Workstream 3 for benchmark numbers.
 
 ---
 
@@ -315,9 +379,9 @@ RecoSys/
 │   ├── metrics.json                         # Pre-baked model metrics for the dashboard
 │   ├── vercel.json                          # SPA rewrite rule
 │   └── api/
-│       ├── recommend.js                     # POST /api/recommend → Cloud Run proxy
-│       ├── health.js                        # GET /api/health → Cloud Run proxy
-│       └── drift.js                         # GET /api/drift → Cloud Run proxy
+│       ├── recommend.js                     # POST /api/recommend → HF Spaces proxy
+│       ├── health.js                        # GET /api/health → HF Spaces proxy
+│       └── drift.js                         # GET /api/drift → HF Spaces proxy
 ├── src/
 │   ├── data/
 │   │   └── feature_builder.py               # Feature engineering helpers (Two-Tower era)
@@ -334,7 +398,7 @@ RecoSys/
 │   │   └── evaluation/
 │   │       └── evaluate_sequence.py         # NDCG@K / HR@K + FAISS-based evaluation
 │   ├── serving/
-│   │   ├── app.py                           # FastAPI app (Cloud Run)
+│   │   ├── app.py                           # FastAPI app (HF Spaces / Cloud Run)
 │   │   ├── model_loader.py                  # Artifact loading (baked image → HF Hub → GCS)
 │   │   └── batching.py                      # Dynamic batch queue (ENABLE_DYNAMIC_BATCHING)
 │   └── two_tower/                           # Two-Tower V1–V6 (all below pop baseline)
@@ -365,7 +429,7 @@ RecoSys/
 │   │   ├── benchmark_inference.py           # WS1+WS3: per-stage profiling + batching sim
 │   │   ├── build_optimized_index.py         # WS2: FAISS index comparison + quality eval
 │   │   ├── log_experiments_mlflow.py        # Push run metrics to MLflow / DagsHub
-│   │   ├── build_and_deploy.ps1             # Docker build + Cloud Run deploy (Windows)
+│   │   ├── build_and_deploy.ps1             # Docker build + deploy script (Windows)
 │   │   ├── test_endpoint.ps1                # Smoke-test the live endpoint
 │   │   └── demo_e2e.ps1                     # End-to-end demo script
 │   ├── monitoring/
@@ -436,8 +500,8 @@ RecoSys/
 ├── model/
 │   ├── model_inference.pt                   # Production checkpoint (epoch 24, NDCG@20=0.2676)
 │   └── vocabs.pkl                           # item2idx / idx2item / user2idx vocabs
-├── Dockerfile.serving                        # Cloud Run serving image
-├── Dockerfile.spaces                         # Hugging Face Spaces image
+├── Dockerfile.serving                        # Serving image (legacy Cloud Run build)
+├── Dockerfile.spaces                         # Hugging Face Spaces serving image (active)
 ├── Dockerfile.mlflow                         # MLflow tracking server image
 ├── Dockerfile.gru4rec                        # Vertex AI training image
 ├── requirements.txt
