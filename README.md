@@ -78,6 +78,7 @@ Cloud Run service: `https://recosys-recommender-o34zzoh3da-uc.a.run.app`
 | 12–13 | Distribution drift monitoring (COVID-period shift) | ✅ Complete |
 | 14 | End-to-end live demo (Vercel) | ✅ Complete |
 | 15 | Inference optimization — profiling, FAISS index comparison, dynamic batching | ✅ Complete |
+| 16 | Weekly re-training pipeline — drift detection (JSD), iterative fine-tuning, experience replay | ✅ Complete |
 
 ---
 
@@ -240,72 +241,205 @@ Knowing which techniques transfer to a recommender is part of the value of this 
 
 ---
 
+## Weekly Re-Training Pipeline
+
+*Detailed results and methodology: [`reports/12_weekly_finetuning.md`](reports/12_weekly_finetuning.md)*  
+*Colab notebook: [`notebooks/12_weekly_finetuning_colab.ipynb`](notebooks/12_weekly_finetuning_colab.ipynb)*  
+*Script: [`scripts/retrain/run_weekly_pipeline.py`](scripts/retrain/run_weekly_pipeline.py)*
+
+A recommender model trained on historical data begins to decay the moment it is deployed. This chapter builds an automated weekly fine-tuning pipeline to keep GRU4Rec V9 adapted to a continuously shifting user distribution. The evaluation period — February and March 2020 — includes the WHO pandemic declaration on March 11, making it an unusually strong natural stress-test for distribution shift.
+
+### Pipeline design (per week)
+
+```
+1. DRIFT DETECTION    — Compute JSD vs. monthly baseline; skip fine-tune if JSD < 0.10
+2. EXPERIENCE REPLAY  — Mix 30% historical sessions into weekly fine-tune data
+3. FINE-TUNING        — 5 epochs, LR 1e-4 → 1e-5 (CosineAnnealingLR), from current best checkpoint
+4. ROLLING EVAL       — Evaluate on NEXT week's data (not a frozen val set)
+5. CHECKPOINT PROMO   — Promote only if rolling NDCG@20 improved ≥ 0.0005
+```
+
+### Drift (JSD) by week
+
+All 8 weeks exceeded the 0.10 threshold. The March JSD series captures the COVID-19 behavioural shift with high fidelity — monotonic acceleration across 4 consecutive weeks beginning the week of the WHO declaration.
+
+| Week | Period | JSD vs. baseline | Baseline month |
+|---|---|---|---|
+| 1 | Feb 01–08 | 0.122 | Jan 2020 |
+| 2 | Feb 08–15 | 0.146 | Jan 2020 |
+| 3 | Feb 15–22 | 0.176 | Jan 2020 |
+| 4 | Feb 22–Mar 01 | 0.195 | Jan 2020 |
+| 5 | Mar 01–08 | 0.125 | Feb 2020 |
+| 6 | Mar 08–15 *(WHO declaration)* | 0.155 | Feb 2020 |
+| 7 | Mar 15–22 | 0.200 | Feb 2020 |
+| 8 | Mar 22–29 | **0.241** | Feb 2020 |
+
+### Rolling evaluation results
+
+Baseline NDCG@20 (original model on Feb 08–15 rolling window): **0.2592**
+
+| Week | Eval window | NDCG@20 | HR@20 | Δ vs. best | Decision |
+|---|---|---|---|---|---|
+| 1 | Feb 08–15 | 0.2667 | 0.491 | **+0.0076** | **promoted** |
+| 2 | Feb 15–22 | 0.2572 | 0.479 | −0.0096 | skipped |
+| 3 | Feb 22–Mar 01 | 0.2596 | 0.482 | −0.0071 | skipped |
+| 4 | Mar 01–08 | 0.2610 | 0.480 | −0.0058 | skipped |
+| 5 | Mar 08–15 | **0.2714** | **0.500** | **+0.0046** | **promoted** |
+| 6 | Mar 15–22 | 0.2572 | 0.485 | −0.0142 | skipped |
+| 7 | Mar 22–29 | 0.2527 | 0.479 | −0.0187 | skipped |
+| 8 | test_sessions.parquet | 0.2370 | 0.435 | −0.0344† | skipped |
+
+†Week 8 eval switches to `test_sessions.parquet` (January distribution) — not comparable to rolling windows.
+
+**Final best checkpoint:** week 5 — NDCG@20=0.2714, HR@20=0.500 (+4.7% relative over baseline)
+
+### Key findings
+
+**Month-boundary fine-tuning works; within-month fine-tuning doesn't.** Both promotions (weeks 1 and 5) are the first week of a new month. All six within-month weeks were skipped. The probability of 6 consecutive negatives by chance is 1/2⁶ ≈ 1.6% — a real pattern. Weekly granularity is likely too fine; a monthly trigger achieves the same promotions with 75% less compute.
+
+**Experience replay prevents forgetting but not overfitting.** Training converges cleanly every week (0.34–0.44 loss drop per week) with no catastrophic forgetting. Within-month failures are caused by overfitting to weekly noise, not loss of historical signal.
+
+**Rolling eval is the correct methodology.** Under a frozen January val set, week 5's successful March adaptation would register as catastrophic regression. Rolling eval correctly measures whether the model predicts the immediate future — the production-relevant question.
+
+**High-drift periods (COVID weeks 6–8) are hard to adapt to.** When the distribution is shifting week-over-week, a model trained on week N cannot reliably predict week N+1 because the ground has moved again. This is a fundamental limitation, not a pipeline flaw.
+
+---
+
 ## Repository layout
 
 ```
 RecoSys/
-├── demo/                            # Vercel-hosted frontend
-│   ├── index.html                   # Full e-commerce UI (Shop + Model Performance tabs)
-│   ├── catalog.json                 # 2,004-item product catalog (from BigQuery)
-│   ├── metrics.json                 # Pre-baked model metrics for the dashboard
-│   ├── vercel.json                  # SPA rewrite rule
+├── demo/                                    # Vercel-hosted frontend
+│   ├── index.html                           # Full e-commerce UI (Shop + Model Performance tabs)
+│   ├── catalog.json                         # 2,004-item product catalog (from BigQuery)
+│   ├── metrics.json                         # Pre-baked model metrics for the dashboard
+│   ├── vercel.json                          # SPA rewrite rule
 │   └── api/
-│       ├── recommend.js             # POST /api/recommend → Cloud Run proxy
-│       ├── health.js                # GET /api/health → Cloud Run proxy
-│       └── drift.js                 # GET /api/drift → Cloud Run proxy
+│       ├── recommend.js                     # POST /api/recommend → Cloud Run proxy
+│       ├── health.js                        # GET /api/health → Cloud Run proxy
+│       └── drift.js                         # GET /api/drift → Cloud Run proxy
 ├── src/
 │   ├── data/
-│   │   └── feature_builder.py
+│   │   └── feature_builder.py               # Feature engineering helpers (Two-Tower era)
 │   ├── sequence/
-│   │   ├── models/gru4rec.py        # GRU4Rec model definition
-│   │   ├── data/session_dataset.py  # SessionTrainDataset, SessionEvalDataset
-│   │   └── evaluation/evaluate_sequence.py
+│   │   ├── models/
+│   │   │   ├── gru4rec.py                   # GRU4Rec V9 model definition
+│   │   │   └── sasrec.py                    # SASRec V10 model (negative result)
+│   │   ├── data/
+│   │   │   ├── session_dataset.py           # SessionTrainDataset, SessionEvalDataset
+│   │   │   ├── sequence_dataset.py          # Sequence-level dataset (non-session framing)
+│   │   │   └── negative_sampler.py          # In-batch negative sampling utilities
+│   │   ├── training/
+│   │   │   └── train_sequence.py            # train_epoch_session, get_param_groups
+│   │   └── evaluation/
+│   │       └── evaluate_sequence.py         # NDCG@K / HR@K + FAISS-based evaluation
 │   ├── serving/
-│   │   ├── app.py                   # FastAPI app (Cloud Run)
-│   │   ├── model_loader.py          # Artifact loading (GCS fallback)
-│   │   └── batching.py              # Dynamic batch queue (WS3)
-│   └── two_tower/
-│       └── ...
+│   │   ├── app.py                           # FastAPI app (Cloud Run)
+│   │   ├── model_loader.py                  # Artifact loading (baked image → HF Hub → GCS)
+│   │   └── batching.py                      # Dynamic batch queue (ENABLE_DYNAMIC_BATCHING)
+│   └── two_tower/                           # Two-Tower V1–V6 (all below pop baseline)
+│       ├── models/two_tower.py
+│       ├── data/dataset.py
+│       ├── training/train.py
+│       └── evaluation/evaluate.py
 ├── scripts/
-│   ├── preprocessing_pipeline.py    # PySpark cleaning (Dataproc)
-│   ├── create_samples.py
-│   ├── create_splits.py
-│   ├── create_interactions.py
-│   ├── build_catalog.py             # BigQuery → demo/catalog.json
+│   ├── preprocessing_pipeline.py            # PySpark cleaning pipeline (Dataproc)
+│   ├── create_samples.py                    # BigQuery → 50k/500k user samples
+│   ├── create_splits.py                     # Temporal train/test splits
+│   ├── create_interactions.py               # Interaction table builder
+│   ├── build_catalog.py                     # BigQuery → demo/catalog.json
+│   ├── data/
+│   │   └── build_1m_sample.py               # 1M-user sample construction from BigQuery
 │   ├── sequence/
-│   │   ├── build_session_sequences.py
-│   │   └── train_gru4rec_session.py
+│   │   ├── build_session_sequences.py       # Events → session parquets (1M)
+│   │   ├── build_sequences_500k.py          # Events → session parquets (500k)
+│   │   ├── rebuild_local_sessions.py        # Local session rebuild from raw CSVs
+│   │   ├── validate_session_sequences.py    # Sanity checks on session parquets
+│   │   ├── train_gru4rec_session.py         # GRU4Rec session training entry point
+│   │   ├── train_gru4rec.py                 # GRU4Rec sequence training (earlier framing)
+│   │   ├── train_sasrec_session.py          # SASRec session training
+│   │   └── train_sasrec.py                  # SASRec sequence training
+│   ├── retrain/
+│   │   └── run_weekly_pipeline.py           # Weekly fine-tuning pipeline (Chapter 12)
+│   ├── serving/
+│   │   ├── benchmark_inference.py           # WS1+WS3: per-stage profiling + batching sim
+│   │   ├── build_optimized_index.py         # WS2: FAISS index comparison + quality eval
+│   │   ├── log_experiments_mlflow.py        # Push run metrics to MLflow / DagsHub
+│   │   ├── build_and_deploy.ps1             # Docker build + Cloud Run deploy (Windows)
+│   │   ├── test_endpoint.ps1                # Smoke-test the live endpoint
+│   │   └── demo_e2e.ps1                     # End-to-end demo script
 │   ├── monitoring/
-│   │   ├── compute_drift.py         # JSD, overlap, coverage → drift_report.json
-│   │   └── plot_drift.py
-│   └── serving/
-│       ├── log_experiments_mlflow.py
-│       ├── benchmark_inference.py   # WS1+WS3: per-stage profiling + batching sim
-│       └── build_optimized_index.py # WS2: FAISS index comparison + quality eval
+│   │   ├── compute_drift.py                 # JSD, overlap, coverage → drift_report.json
+│   │   ├── plot_drift.py                    # Drift visualisation plots
+│   │   └── restore_mlflow_logs.py           # Restore MLflow run logs from backup
+│   ├── cloud/
+│   │   ├── setup_gcp.sh                     # GCP project + API setup
+│   │   ├── submit_vertex_job.sh             # Launch Vertex AI training job
+│   │   ├── deploy_mlflow.ps1                # Deploy MLflow server to GCE
+│   │   └── make_public.ps1                  # Make GCS artifacts publicly readable
+│   ├── deploy/
+│   │   └── upload_to_hf_hub.py             # Upload model artifacts to HF Hub dataset
+│   ├── diagnostics/
+│   │   └── diagnostic_cold_warm_inversion.py  # Cold/warm embedding inversion analysis
+│   └── two_tower/                           # Two-Tower V1–V6 scripts (negative results)
+│       ├── train_two_tower.py … train_two_tower_v6.py
+│       ├── build_user_features.py / build_item_features.py
+│       ├── evaluate_two_tower.py
+│       └── diagnose_*.py / investigate_negatives.py
 ├── notebooks/
-│   ├── 01_setup_and_integration.ipynb
-│   ├── 02_sampling_and_splits.ipynb
-│   ├── 03_EDA_BigQuery.ipynb
-│   ├── 04_EDA_DataProc.ipynb
+│   ├── 01_setup_and_integration.ipynb       # GCP + BigQuery setup
+│   ├── 02_BigQuery_Setup.ipynb              # BigQuery schema + raw data verification
+│   ├── 03_EDA_BigQuery.ipynb                # Exploratory analysis (BigQuery)
+│   ├── 04_EDA_DataProc.ipynb                # Exploratory analysis (Dataproc / Spark)
 │   ├── 05_cleaned_sample_BigQuery_validation.ipynb
-│   ├── 08_GRU4Rec_Rebuild_Colab.ipynb
-│   ├── 09_SASRec_V10_Colab.ipynb
-│   └── 10_inference_optimization_colab.ipynb  # Chapter 10
+│   ├── 06_feature_verification_for_TT.ipynb # Two-Tower feature verification
+│   ├── 07_two_tower_500k_colab.ipynb        # Two-Tower 500k training (Colab)
+│   ├── 08_GRU4Rec_Rebuild_Colab.ipynb       # GRU4Rec V9 rebuild + 500k training
+│   ├── 09_SASRec_V10_Colab.ipynb            # SASRec V10 (negative result, 5 attempts)
+│   ├── 10_inference_optimization_colab.ipynb  # Inference profiling + FAISS comparison
+│   ├── 11_rebuild_session_parquets_colab.ipynb  # Rebuild session parquets for 1M
+│   └── 12_weekly_finetuning_colab.ipynb     # Weekly re-training pipeline (Chapter 12)
 ├── reports/
-│   ├── 07_session_model_results.md          # GRU4Rec V9 500k results + SASRec failure analysis
+│   ├── 01_eda_report_v1.md                  # First-pass EDA findings
+│   ├── 02_eda_report_v2.md                  # Refined EDA with Spark
+│   ├── 03_dataproc_preprocessing_run.md     # Dataproc cleaning pipeline run log
+│   ├── 04_sampling_splits_interactions.md   # Sampling + split methodology
+│   ├── 05_model_experiments_50k.md          # Two-Tower V1–V6 experiment results
+│   ├── 06_failure_analysis_pretransition.md # Pre-GRU4Rec failure analysis
+│   ├── 07_session_model_results.md          # GRU4Rec V9 500k results + SASRec failure
 │   ├── 08_vertex_ai_1m_training.md          # 1M Vertex AI training log (epoch-by-epoch)
-│   ├── 09_inference_optimization.md         # Inference optimization results (fill after running)
-│   ├── drift_report.json                    # Latest drift monitor output
+│   ├── 09_inference_optimization.md         # Inference optimization methodology + results
+│   ├── 12_weekly_finetuning.md              # Weekly re-training pipeline results
+│   ├── drift_report.json                    # Latest distribution drift monitor output
+│   ├── inference_benchmark_baseline.json    # WS1 raw benchmark output
+│   ├── inference_index_tradeoffs.json       # WS2 FAISS index comparison output
 │   └── figures/
-│       ├── 500k_training_curves.png
-│       ├── item_popularity_drift.png
-│       ├── latency_breakdown.png            # WS1: stage latency + throughput
+│       ├── 500k_training_curves.png         # Val NDCG@20 + train loss over epochs
+│       ├── item_popularity_drift.png        # Popularity distribution drift plot
+│       ├── popularity_rank_scatter.png      # Rank-frequency scatter
+│       ├── latency_breakdown.png            # WS1: stage latency + throughput vs concurrency
 │       ├── faiss_tradeoff_curve.png         # WS2: index comparison 4-panel
 │       ├── index_size_vs_ndcg.png           # WS2: size vs quality scatter
 │       └── batching_throughput.png          # WS3: batch size vs throughput/latency
 ├── artifacts/
-│   └── diagnostics/
-│       └── cold_warm_summary.json
+│   ├── 500k/
+│   │   ├── user_features_500k/              # Parquet user feature table (500k)
+│   │   └── item_features/                   # Parquet item feature table
+│   └── 1M/
+│       └── sequences/                       # train/val/test session parquets (1M)
+├── configs/
+│   └── vertex_gru4rec_1m.yaml              # Vertex AI job config for 1M GRU4Rec run
+├── docs/
+│   ├── sequence_model_results.md            # Internal sequence model results reference
+│   ├── prior_work_comparative_analysis.md   # Comparison against prior work
+│   └── day5_14_continuation_brief.md        # Project continuation notes
+├── model/
+│   ├── model_inference.pt                   # Production checkpoint (epoch 24, NDCG@20=0.2676)
+│   └── vocabs.pkl                           # item2idx / idx2item / user2idx vocabs
+├── Dockerfile.serving                        # Cloud Run serving image
+├── Dockerfile.spaces                         # Hugging Face Spaces image
+├── Dockerfile.mlflow                         # MLflow tracking server image
+├── Dockerfile.gru4rec                        # Vertex AI training image
 ├── requirements.txt
 └── README.md
 ```

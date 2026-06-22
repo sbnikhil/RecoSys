@@ -20,11 +20,13 @@ external events can disrupt purchasing patterns abruptly. This chapter asks:
 
 Three sub-questions:
 
-| # | Question | Technique |
-|---|---|---|
-| 1 | How do we detect that retraining is warranted? | Jensen-Shannon Divergence (JSD) drift monitoring |
-| 2 | How do we evaluate whether fine-tuning actually helped? | Rolling next-period evaluation |
-| 3 | How do we prevent the model from forgetting its broad pre-training? | Experience replay |
+
+| #   | Question                                                            | Technique                                        |
+| --- | ------------------------------------------------------------------- | ------------------------------------------------ |
+| 1   | How do we detect that retraining is warranted?                      | Jensen-Shannon Divergence (JSD) drift monitoring |
+| 2   | How do we evaluate whether fine-tuning actually helped?             | Rolling next-period evaluation                   |
+| 3   | How do we prevent the model from forgetting its broad pre-training? | Experience replay                                |
+
 
 The evaluation period covers February and March 2020 — a span that includes the
 WHO pandemic declaration on March 11, making it an unusually strong natural stress-test
@@ -36,11 +38,13 @@ for distribution shift.
 
 The base checkpoint was trained on a 90/5/5 split of the full REES46 1M-user dataset:
 
-| Split | Period | Sessions |
-|---|---|---|
+
+| Split | Period           | Sessions  |
+| ----- | ---------------- | --------- |
 | Train | Through Jan 2020 | 2,887,783 |
-| Val | Jan 25 – Feb 1 | 151,693 |
-| Test | Feb, held-out | 515,358 |
+| Val   | Jan 25 – Feb 1   | 151,693   |
+| Test  | Feb, held-out    | 515,358   |
+
 
 Training hyperparameters: Adam, LR=3e-4, cosine decay, batch=512, 30 epochs.
 Achieved NDCG@20=0.2676 / HR@20=0.4815 on the held-out test set (Chapter 08).
@@ -89,16 +93,18 @@ to resume across sessions without re-running completed weeks.
 
 ### 3.2 Week Ranges
 
-| Week | Fine-tune period | Rolling eval period | Drift baseline |
-|---|---|---|---|
-| 1 | Feb 01 – Feb 08 | Feb 08 – Feb 15 | Jan 2020 |
-| 2 | Feb 08 – Feb 15 | Feb 15 – Feb 22 | Jan 2020 |
-| 3 | Feb 15 – Feb 22 | Feb 22 – Mar 01 | Jan 2020 |
-| 4 | Feb 22 – Mar 01 | Mar 01 – Mar 08 | Jan 2020 |
-| 5 | Mar 01 – Mar 08 | Mar 08 – Mar 15 | Feb 2020 |
-| 6 | Mar 08 – Mar 15 | Mar 15 – Mar 22 | Feb 2020 |
-| 7 | Mar 15 – Mar 22 | Mar 22 – Mar 29 | Feb 2020 |
-| 8 | Mar 22 – Mar 29 | test_sessions.parquet *(fallback)* | Feb 2020 |
+
+| Week | Fine-tune period | Rolling eval period                | Drift baseline |
+| ---- | ---------------- | ---------------------------------- | -------------- |
+| 1    | Feb 01 – Feb 08  | Feb 08 – Feb 15                    | Jan 2020       |
+| 2    | Feb 08 – Feb 15  | Feb 15 – Feb 22                    | Jan 2020       |
+| 3    | Feb 15 – Feb 22  | Feb 22 – Mar 01                    | Jan 2020       |
+| 4    | Feb 22 – Mar 01  | Mar 01 – Mar 08                    | Jan 2020       |
+| 5    | Mar 01 – Mar 08  | Mar 08 – Mar 15                    | Feb 2020       |
+| 6    | Mar 08 – Mar 15  | Mar 15 – Mar 22                    | Feb 2020       |
+| 7    | Mar 15 – Mar 22  | Mar 22 – Mar 29                    | Feb 2020       |
+| 8    | Mar 22 – Mar 29  | test_sessions.parquet *(fallback)* | Feb 2020       |
+
 
 ### 3.3 Drift Detection — Jensen-Shannon Divergence
 
@@ -163,15 +169,17 @@ dominates) against memory retention (history anchor is present in every batch).
 
 ### 3.6 Fine-Tuning Hyperparameters
 
-| Parameter | Value | Rationale |
-|---|---|---|
-| Learning rate | 1e-4 (→ 1e-5 via cosine) | 3× lower than pre-training LR (3e-4) — limits step size |
-| Epochs | 5 | Sufficient to converge on ~199K sessions; avoids over-adaptation |
-| Batch size | 128 | Same as pre-training |
-| Optimizer | AdamW, weight_decay=1e-5 | Same as pre-training |
-| Scheduler | CosineAnnealingLR, T_max=5 | Smooth decay; no restarts needed for short runs |
-| Loss | Cross-entropy next-item prediction | Unchanged from pre-training |
-| Promotion threshold | NDCG@20 Δ ≥ 0.0005 | Guards against promoting noise |
+
+| Parameter           | Value                              | Rationale                                                        |
+| ------------------- | ---------------------------------- | ---------------------------------------------------------------- |
+| Learning rate       | 1e-4 (→ 1e-5 via cosine)           | 3× lower than pre-training LR (3e-4) — limits step size          |
+| Epochs              | 5                                  | Sufficient to converge on ~199K sessions; avoids over-adaptation |
+| Batch size          | 128                                | Same as pre-training                                             |
+| Optimizer           | AdamW, weight_decay=1e-5           | Same as pre-training                                             |
+| Scheduler           | CosineAnnealingLR, T_max=5         | Smooth decay; no restarts needed for short runs                  |
+| Loss                | Cross-entropy next-item prediction | Unchanged from pre-training                                      |
+| Promotion threshold | NDCG@20 Δ ≥ 0.0005                 | Guards against promoting noise                                   |
+
 
 ### 3.7 Script
 
@@ -199,36 +207,42 @@ python scripts/retrain/run_weekly_pipeline.py \
 
 **February (vs. Jan 2020 baseline):**
 
-| Week | Period | JSD vs. Jan |
-|---|---|---|
-| 1 | Feb 01–08 | 0.122 |
-| 2 | Feb 08–15 | 0.146 |
-| 3 | Feb 15–22 | 0.176 |
-| 4 | Feb 22–Mar 01 | 0.195 |
+
+| Week | Period        | JSD vs. Jan |
+| ---- | ------------- | ----------- |
+| 1    | Feb 01–08     | 0.122       |
+| 2    | Feb 08–15     | 0.146       |
+| 3    | Feb 15–22     | 0.176       |
+| 4    | Feb 22–Mar 01 | 0.195       |
+
 
 **March (vs. Feb 2020 baseline):**
 
-| Week | Period | JSD vs. Feb |
-|---|---|---|
-| 5 | Mar 01–08 | 0.125 |
-| 6 | Mar 08–15 | 0.155 |
-| 7 | Mar 15–22 | 0.200 |
-| 8 | Mar 22–29 | **0.241** |
+
+| Week | Period    | JSD vs. Feb |
+| ---- | --------- | ----------- |
+| 5    | Mar 01–08 | 0.125       |
+| 6    | Mar 08–15 | 0.155       |
+| 7    | Mar 15–22 | 0.200       |
+| 8    | Mar 22–29 | **0.241**   |
+
 
 All 8 weeks exceeded the 0.10 drift threshold and proceeded to fine-tuning.
 
 ### 4.2 Training Loss Convergence (5 epochs per week)
 
-| Week | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 | Epoch 5 | Drop |
-|---|---|---|---|---|---|---|
-| 1 | 7.360 | 7.158 | 7.054 | 6.989 | 6.952 | −0.408 |
-| 2 | 7.296 | 7.144 | 7.047 | 6.985 | 6.951 | −0.345 |
-| 3 | 7.395 | 7.215 | 7.107 | 7.040 | 7.002 | −0.393 |
-| 4 | 7.435 | 7.241 | 7.128 | 7.056 | 7.017 | −0.418 |
-| 5 | 7.439 | 7.226 | 7.108 | 7.037 | 6.998 | −0.441 |
-| 6 | 7.318 | 7.168 | 7.075 | 7.013 | 6.977 | −0.341 |
-| 7 | 7.386 | 7.215 | 7.117 | 7.052 | 7.016 | −0.370 |
-| 8 | 7.431 | 7.232 | 7.123 | 7.055 | 7.018 | −0.413 |
+
+| Week | Epoch 1 | Epoch 2 | Epoch 3 | Epoch 4 | Epoch 5 | Drop   |
+| ---- | ------- | ------- | ------- | ------- | ------- | ------ |
+| 1    | 7.360   | 7.158   | 7.054   | 6.989   | 6.952   | −0.408 |
+| 2    | 7.296   | 7.144   | 7.047   | 6.985   | 6.951   | −0.345 |
+| 3    | 7.395   | 7.215   | 7.107   | 7.040   | 7.002   | −0.393 |
+| 4    | 7.435   | 7.241   | 7.128   | 7.056   | 7.017   | −0.418 |
+| 5    | 7.439   | 7.226   | 7.108   | 7.037   | 6.998   | −0.441 |
+| 6    | 7.318   | 7.168   | 7.075   | 7.013   | 6.977   | −0.341 |
+| 7    | 7.386   | 7.215   | 7.117   | 7.052   | 7.016   | −0.370 |
+| 8    | 7.431   | 7.232   | 7.123   | 7.055   | 7.018   | −0.413 |
+
 
 Training converges cleanly every week (consistent 0.34–0.44 loss drop across 5 epochs).
 There are no signs of divergence, gradient explosion, or under-training. The starting
@@ -240,17 +254,19 @@ local minimum and fine-tunes from there.
 
 Baseline NDCG@20 (original model evaluated on Feb 08–15 rolling window): **0.2592**
 
-| Week | Eval window | JSD | NDCG@20 | HR@20 | Δ vs. best | Decision |
-|---|---|---|---|---|---|---|
-| — | Baseline (Feb 08–15) | — | 0.2592 | — | — | — |
-| 1 | Feb 08–15 | 0.122 | 0.2667 | 0.491 | **+0.0076** | **promoted** |
-| 2 | Feb 15–22 | 0.146 | 0.2572 | 0.479 | −0.0096 | skipped |
-| 3 | Feb 22–Mar 01 | 0.176 | 0.2596 | 0.482 | −0.0071 | skipped |
-| 4 | Mar 01–08 | 0.195 | 0.2610 | 0.480 | −0.0058 | skipped |
-| 5 | Mar 08–15 | 0.125 | **0.2714** | **0.500** | **+0.0046** | **promoted** |
-| 6 | Mar 15–22 | 0.155 | 0.2572 | 0.485 | −0.0142 | skipped |
-| 7 | Mar 22–29 | 0.200 | 0.2527 | 0.479 | −0.0187 | skipped |
-| 8 | test_sessions.parquet | 0.241 | 0.2370 | 0.435 | −0.0344 | skipped |
+
+| Week | Eval window           | JSD   | NDCG@20    | HR@20     | Δ vs. best  | Decision     |
+| ---- | --------------------- | ----- | ---------- | --------- | ----------- | ------------ |
+| —    | Baseline (Feb 08–15)  | —     | 0.2592     | —         | —           | —            |
+| 1    | Feb 08–15             | 0.122 | 0.2667     | 0.491     | **+0.0076** | **promoted** |
+| 2    | Feb 15–22             | 0.146 | 0.2572     | 0.479     | −0.0096     | skipped      |
+| 3    | Feb 22–Mar 01         | 0.176 | 0.2596     | 0.482     | −0.0071     | skipped      |
+| 4    | Mar 01–08             | 0.195 | 0.2610     | 0.480     | −0.0058     | skipped      |
+| 5    | Mar 08–15             | 0.125 | **0.2714** | **0.500** | **+0.0046** | **promoted** |
+| 6    | Mar 15–22             | 0.155 | 0.2572     | 0.485     | −0.0142     | skipped      |
+| 7    | Mar 22–29             | 0.200 | 0.2527     | 0.479     | −0.0187     | skipped      |
+| 8    | test_sessions.parquet | 0.241 | 0.2370     | 0.435     | −0.0344     | skipped      |
+
 
 Final best checkpoint: **week 5** — NDCG@20=0.2714, HR@20=0.500
 Overall improvement vs. baseline: **+4.7% NDCG@20** (+0.0122 absolute)
@@ -269,15 +285,14 @@ within a month was promoted.
 This is not coincidence. It reflects a real property of how user behaviour is structured:
 
 - **Monthly boundary (Jan → Feb, Feb → Mar):** A new month introduces genuinely new
-  distribution patterns — post-January sale browsing, pre-spring inventory changes,
-  new product launches. The first week of each month carries strong distributional signal
-  about the new period, and fine-tuning on it correctly captures that shift.
-
+distribution patterns — post-January sale browsing, pre-spring inventory changes,
+new product launches. The first week of each month carries strong distributional signal
+about the new period, and fine-tuning on it correctly captures that shift.
 - **Within-month weeks (2, 3, 4 and 6, 7, 8):** These weeks share most of their item
-  distribution with the week just before them. Fine-tuning on a single week of within-month
-  data produces a model that is very specific to that week's micro-fluctuations — popular
-  items from a weekend sale, for example — which don't generalise to the following week.
-  The model effectively overfits to weekly noise.
+distribution with the week just before them. Fine-tuning on a single week of within-month
+data produces a model that is very specific to that week's micro-fluctuations — popular
+items from a weekend sale, for example — which don't generalise to the following week.
+The model effectively overfits to weekly noise.
 
 The consistent direction (negative Δ for all 6 within-month weeks) is not random. The
 probability of observing 6 consecutive negative improvements by chance is 1/2⁶ ≈ 1.6%.
@@ -308,12 +323,14 @@ SE(NDCG@20) ≈ 0.35 / sqrt(40,000) ≈ 0.00175
 95% CI width ≈ ±0.0035
 ```
 
-| Week | Δ NDCG@20 | Approx. z-score | Significance |
-|---|---|---|---|
-| 1 | +0.0076 | ~2.2 | Borderline (p ≈ 0.03) |
-| 5 | +0.0046 | ~1.3 | Not individually significant (p ≈ 0.20) |
-| 2–4, 6–7 | −0.006 to −0.010 | ~1.7–2.9 | Consistent direction; meaningful as group |
-| 8 | −0.034 | ~9.7 | Large, but confounded by fallback eval set |
+
+| Week     | Δ NDCG@20        | Approx. z-score | Significance                               |
+| -------- | ---------------- | --------------- | ------------------------------------------ |
+| 1        | +0.0076          | ~2.2            | Borderline (p ≈ 0.03)                      |
+| 5        | +0.0046          | ~1.3            | Not individually significant (p ≈ 0.20)    |
+| 2–4, 6–7 | −0.006 to −0.010 | ~1.7–2.9        | Consistent direction; meaningful as group  |
+| 8        | −0.034           | ~9.7            | Large, but confounded by fallback eval set |
+
 
 **The individual improvements are small.** Week 1's gain is borderline significant and
 week 5's is not individually significant. The correct reading is that the *pattern across
@@ -329,12 +346,14 @@ Do not interpret this as a regression.
 
 The JSD series for March (vs. Feb baseline) is the clearest finding in this chapter:
 
-| Week | Period | JSD vs. Feb | Event |
-|---|---|---|---|
-| 5 | Mar 01–08 | 0.125 | Pre-pandemic; business as usual |
-| 6 | Mar 08–15 | 0.155 | **WHO pandemic declaration: March 11** |
-| 7 | Mar 15–22 | 0.200 | National lockdowns begin across Europe |
-| 8 | Mar 22–29 | **0.241** | Full lockdown behavioural disruption |
+
+| Week | Period    | JSD vs. Feb | Event                                  |
+| ---- | --------- | ----------- | -------------------------------------- |
+| 5    | Mar 01–08 | 0.125       | Pre-pandemic; business as usual        |
+| 6    | Mar 08–15 | 0.155       | **WHO pandemic declaration: March 11** |
+| 7    | Mar 15–22 | 0.200       | National lockdowns begin across Europe |
+| 8    | Mar 22–29 | **0.241**   | Full lockdown behavioural disruption   |
+
 
 The shift is **gradual, not a spike.** JSD increases monotonically week over week:
 +24% from week 5 to 6, +29% from 6 to 7, +21% from 7 to 8. This makes sense
@@ -354,12 +373,14 @@ not easier, because the target distribution is itself a moving target.
 The prior run of this pipeline used `val_sessions.parquet` (frozen at Jan 25–Feb 1)
 as the evaluation set for all weeks. The results under that methodology:
 
-| Week | Frozen val NDCG@20 | Rolling eval NDCG@20 | Interpretation difference |
-|---|---|---|---|
-| 1 | 0.2721 (promoted) | 0.2667 (promoted) | Both agree: week 1 helps |
-| 2 | 0.2608 (skipped) | 0.2572 (skipped) | Both agree: week 2 doesn't help |
-| 3 | 0.2510 (skipped) | 0.2596 (skipped) | Rolling slightly less pessimistic |
-| 4 | 0.2489 (skipped) | 0.2610 (skipped) | Rolling +1.2pp higher — real signal |
+
+| Week | Frozen val NDCG@20 | Rolling eval NDCG@20 | Interpretation difference           |
+| ---- | ------------------ | -------------------- | ----------------------------------- |
+| 1    | 0.2721 (promoted)  | 0.2667 (promoted)    | Both agree: week 1 helps            |
+| 2    | 0.2608 (skipped)   | 0.2572 (skipped)     | Both agree: week 2 doesn't help     |
+| 3    | 0.2510 (skipped)   | 0.2596 (skipped)     | Rolling slightly less pessimistic   |
+| 4    | 0.2489 (skipped)   | 0.2610 (skipped)     | Rolling +1.2pp higher — real signal |
+
 
 Both methodologies agree on the decisions (week 1 promoted, weeks 2–4 not). But the
 frozen val numbers tell a misleading story: the trend 0.2721 → 0.2608 → 0.2510 → 0.2489
@@ -446,17 +467,19 @@ the broad pre-training signal from 2.9M historical sessions.
 
 ## 8. Reproducibility
 
-| Setting | Value |
-|---|---|
-| Replay random seed | 42 |
-| Base checkpoint | `model_inference.pt` (frozen, never modified) |
-| Session parquets | `train_sessions.parquet` (2,887,783), `test_sessions.parquet` (515,358) |
-| Raw CSVs | REES46 `2020-Jan.csv.gz`, `2020-Feb.csv.gz`, `2020-Mar.csv.gz` |
-| Hardware | NVIDIA A100-SXM4-40GB (Google Colab) |
-| Fine-tune LR | 1e-4, cosine to 1e-5 over 5 epochs |
-| Replay ratio | 0.30 |
-| Drift threshold | JSD ≥ 0.10 |
-| Promotion threshold | NDCG@20 Δ ≥ 0.0005 |
+
+| Setting             | Value                                                                   |
+| ------------------- | ----------------------------------------------------------------------- |
+| Replay random seed  | 42                                                                      |
+| Base checkpoint     | `model_inference.pt` (frozen, never modified)                           |
+| Session parquets    | `train_sessions.parquet` (2,887,783), `test_sessions.parquet` (515,358) |
+| Raw CSVs            | REES46 `2020-Jan.csv.gz`, `2020-Feb.csv.gz`, `2020-Mar.csv.gz`          |
+| Hardware            | NVIDIA A100-SXM4-40GB (Google Colab)                                    |
+| Fine-tune LR        | 1e-4, cosine to 1e-5 over 5 epochs                                      |
+| Replay ratio        | 0.30                                                                    |
+| Drift threshold     | JSD ≥ 0.10                                                              |
+| Promotion threshold | NDCG@20 Δ ≥ 0.0005                                                      |
+
 
 ```bash
 # Full 8-week run
@@ -476,3 +499,4 @@ python scripts/retrain/run_weekly_pipeline.py \
 
 # Colab notebook: notebooks/12_weekly_finetuning_colab.ipynb
 ```
+
