@@ -1,26 +1,17 @@
-const { GoogleAuth } = require('google-auth-library');
-
-const SERVICE_URL = 'https://recosys-recommender-o34zzoh3da-uc.a.run.app';
-
-let _client = null;
-
-async function getClient() {
-  if (_client) return _client;
-  const credentials = JSON.parse(process.env.GCP_SA_KEY.replace(/^﻿/, ''));
-  const auth = new GoogleAuth({ credentials });
-  _client = await auth.getIdTokenClient(SERVICE_URL);
-  return _client;
-}
+const BACKEND_URL = process.env.BACKEND_URL;
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
+  if (!BACKEND_URL) {
+    return res.status(503).json({ error: 'BACKEND_URL environment variable not set' });
+  }
+
   try {
-    const client = await getClient();
-    const upstream = await client.request({ url: `${SERVICE_URL}/health` });
-    res.status(200).json(upstream.data);
+    const upstream = await fetch(`${BACKEND_URL}/health`);
+    const data = await upstream.json();
+    res.status(upstream.status).json(data);
   } catch (err) {
-    const status = err.response?.status ?? 503;
-    res.status(status).json(err.response?.data ?? { error: err.message });
+    res.status(503).json({ error: err.message });
   }
 };

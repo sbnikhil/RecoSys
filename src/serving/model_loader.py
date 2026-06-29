@@ -1,8 +1,9 @@
 """Load GRU4Rec V9 artifacts and build the FAISS serving index.
 
 Artifact resolution order (first match wins):
-  1. /app/model/  — baked into Docker image (instant load, preferred)
-  2. GCS          — downloaded at runtime (fallback if image has no baked artifacts)
+  1. /app/model/        — baked into Docker image (instant load, preferred)
+  2. HF Hub dataset     — if HF_DATASET_REPO env var is set (Hugging Face Spaces)
+  3. GCS                — downloaded at runtime (legacy Cloud Run fallback)
 
 Called once at FastAPI lifespan startup via a background thread so the HTTP
 server binds to port 8080 immediately.
@@ -10,6 +11,7 @@ server binds to port 8080 immediately.
 
 from __future__ import annotations
 
+import os
 import pickle
 from pathlib import Path
 from typing import NamedTuple
@@ -23,6 +25,8 @@ from src.sequence.models.gru4rec import GRU4RecModel
 
 # Baked artifact paths (populated when COPY model/ model/ is in Dockerfile)
 _BAKED_DIR = Path("/app/model")
+# HF Hub dataset repo (set via env var in HF Spaces Dockerfile)
+_HF_DATASET_REPO = os.environ.get("HF_DATASET_REPO", "")
 
 EVENT_TYPE_MAP: dict[str, int] = {
     "view":     1,
@@ -37,6 +41,24 @@ class ServingArtifacts(NamedTuple):
     item_idx_array: np.ndarray   # (n_indexed,) int64 — FAISS row → item_idx
     vocabs:         dict
     hparams:        dict
+
+
+def _hf_download(repo_id: str, filename: str, local_path: Path) -> None:
+    if local_path.exists():
+        return
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    from huggingface_hub import hf_hub_download  # type: ignore
+    print(f"  Downloading {filename} from HF Hub ({repo_id}) ...")
+    # local_dir writes a real file (no symlinks) — avoids EXDEV when HF cache
+    # and /tmp are on different container mounts.
+    hf_hub_download(
+        repo_id   = repo_id,
+        filename  = filename,
+        repo_type = "dataset",
+        local_dir = str(local_path.parent),
+    )
+    mb = local_path.stat().st_size / 1024 / 1024
+    print(f"  Downloaded {filename} ({mb:.1f} MB)")
 
 
 def _gcs_download(gcs_uri: str, local_path: Path) -> None:
@@ -68,6 +90,10 @@ def load_artifacts(
         print("  Using baked model artifacts from /app/model/")
         ckpt_path   = baked_ckpt
         vocabs_path = baked_vocabs
+    elif _HF_DATASET_REPO:
+        print(f"  Downloading artifacts from HF Hub: {_HF_DATASET_REPO}")
+        _hf_download(_HF_DATASET_REPO, "model_inference.pt", ckpt_path := Path("/tmp/recosys_serving/model_inference.pt"))
+        _hf_download(_HF_DATASET_REPO, "vocabs.pkl",         vocabs_path := Path("/tmp/recosys_serving/vocabs.pkl"))
     else:
         print("  Baked artifacts not found — downloading from GCS ...")
         tmp = Path("/tmp/recosys_serving")

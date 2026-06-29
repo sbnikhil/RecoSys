@@ -1,0 +1,35 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+
+# CPU-only PyTorch (saves ~1 GB vs CUDA wheel)
+RUN pip install --no-cache-dir \
+    torch==2.1.0+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# faiss-cpu pinned to NumPy 1.x to avoid ABI crash
+RUN pip install --no-cache-dir \
+    "numpy>=1.24.0,<2.0.0" \
+    faiss-cpu==1.7.4 \
+    fastapi>=0.110.0 \
+    "uvicorn[standard]>=0.27.0" \
+    pydantic>=2.0.0 \
+    slowapi>=0.1.9 \
+    "limits>=3.0.0" \
+    "huggingface_hub>=0.22.0" \
+    scipy>=1.11.0
+
+COPY src/ src/
+
+# Model files are downloaded from HF Hub at startup (see src/serving/model_loader.py).
+# Set HF_DATASET_REPO to your dataset repo, e.g. yourname/recosys-models
+ENV HF_DATASET_REPO=""
+ENV PYTHONUNBUFFERED=1
+
+# HF Spaces requires port 7860
+EXPOSE 7860
+CMD ["uvicorn", "src.serving.app:app", "--host", "0.0.0.0", "--port", "7860"]

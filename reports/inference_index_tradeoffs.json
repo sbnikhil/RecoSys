@@ -1,0 +1,101 @@
+{
+  "run_info": {
+    "n_items_indexed": 222863,
+    "embed_dim": 128,
+    "n_bench_queries": 1000,
+    "n_test_sessions": 5000,
+    "seed": 42
+  },
+  "index_results": [
+    {
+      "index_name": "FlatIP",
+      "build_time_s": 0.028,
+      "size_mb": 108.8,
+      "concordance": 1.0,
+      "latency": {
+        "p50_ms": 6.959,
+        "p90_ms": 7.837,
+        "p99_ms": 10.368,
+        "mean_ms": 7.238
+      },
+      "hr_20": 0.4528,
+      "ndcg_20": 0.2483,
+      "n_sessions": 5000
+    },
+    {
+      "index_name": "IVFFlat-256",
+      "build_time_s": 0.706,
+      "size_mb": 110.6,
+      "concordance": 0.9417,
+      "latency": {
+        "p50_ms": 0.69,
+        "p90_ms": 1.076,
+        "p99_ms": 1.398,
+        "mean_ms": 0.725
+      },
+      "hr_20": 0.4508,
+      "ndcg_20": 0.2474,
+      "n_sessions": 5000
+    },
+    {
+      "index_name": "IVFFlat-512",
+      "build_time_s": 2.254,
+      "size_mb": 110.8,
+      "concordance": 0.9465,
+      "latency": {
+        "p50_ms": 0.648,
+        "p90_ms": 0.98,
+        "p99_ms": 1.396,
+        "mean_ms": 0.687
+      },
+      "hr_20": 0.452,
+      "ndcg_20": 0.2479,
+      "n_sessions": 5000
+    },
+    {
+      "index_name": "SQ8",
+      "build_time_s": 0.093,
+      "size_mb": 27.2,
+      "concordance": 0.794,
+      "latency": {
+        "p50_ms": 4.905,
+        "p90_ms": 5.377,
+        "p99_ms": 7.054,
+        "mean_ms": 5.088
+      },
+      "hr_20": 0.4534,
+      "ndcg_20": 0.2488,
+      "n_sessions": 5000
+    },
+    {
+      "index_name": "IVFPQ",
+      "build_time_s": 4.283,
+      "size_mb": 5.4,
+      "concordance": 0.5145,
+      "latency": {
+        "p50_ms": 2.925,
+        "p90_ms": 3.353,
+        "p99_ms": 9.302,
+        "mean_ms": 3.133
+      },
+      "hr_20": 0.408,
+      "ndcg_20": 0.2168,
+      "n_sessions": 5000
+    },
+    {
+      "index_name": "HNSW32",
+      "build_time_s": 61.13,
+      "size_mb": 166.7,
+      "concordance": 0.811,
+      "latency": {
+        "p50_ms": 0.07,
+        "p90_ms": 0.1,
+        "p99_ms": 0.168,
+        "mean_ms": 0.072
+      },
+      "hr_20": 0.3926,
+      "ndcg_20": 0.2145,
+      "n_sessions": 5000
+    }
+  ]
+}
